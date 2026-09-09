@@ -244,6 +244,11 @@ export const runtimeConfigValueSchema = networkConfigValueSchema.extend({
   preludeSdkTimeoutMs: positiveIntValue.default(APP_RUNTIME_DEFAULTS.preludeSdkTimeoutMs),
   plausibleDomain: nonEmptyStringValue.optional(),
   plausibleScriptUrl: urlValue.optional(),
+  /**
+   * Absent or empty disables Pulse. Deliberately not format-validated: this schema backs every
+   * consumer of `window.__PUBKY_CONFIG__`, so a throw on a bad analytics key would break boot.
+   */
+  pulseClientKey: nonEmptyStringValue.optional(),
   previewImage: nonEmptyStringValue.default(APP_RUNTIME_DEFAULTS.previewImage),
   siteName: nonEmptyStringValue.default(APP_RUNTIME_DEFAULTS.siteName),
   locale: nonEmptyStringValue.default(APP_RUNTIME_DEFAULTS.locale),
@@ -309,6 +314,7 @@ export const runtimeEnvInputSchema = z
     preludeSdkTimeoutMs: optionalPositiveIntFromString,
     plausibleDomain: optionalTrimmedString,
     plausibleScriptUrl: optionalUrlFromString,
+    pulseClientKey: optionalTrimmedString,
     previewImage: optionalTrimmedString,
     siteName: optionalTrimmedString,
     locale: optionalTrimmedString,
@@ -384,6 +390,7 @@ export const runtimeEnvInputSchemaWithDefaults = z
     preludeSdkTimeoutMs: optionalPositiveIntFromString,
     plausibleDomain: optionalTrimmedString,
     plausibleScriptUrl: optionalUrlFromString,
+    pulseClientKey: optionalTrimmedString,
     previewImage: optionalTrimmedString,
     siteName: optionalTrimmedString,
     locale: optionalTrimmedString,
@@ -452,6 +459,7 @@ export const PUBKY_RUNTIME_ENV_NAMES: Record<keyof RuntimeConfig, string> = {
   preludeSdkTimeoutMs: 'PUBKY_RUNTIME_PRELUDE_SDK_TIMEOUT_MS',
   plausibleDomain: 'PUBKY_RUNTIME_PLAUSIBLE_DOMAIN',
   plausibleScriptUrl: 'PUBKY_RUNTIME_PLAUSIBLE_SCRIPT_URL',
+  pulseClientKey: 'PUBKY_RUNTIME_PULSE_CLIENT_KEY',
   previewImage: 'PUBKY_RUNTIME_PREVIEW_IMAGE',
   siteName: 'PUBKY_RUNTIME_SITE_NAME',
   locale: 'PUBKY_RUNTIME_LOCALE',
@@ -510,6 +518,7 @@ export const NEXT_PUBLIC_ENV_NAMES: Record<keyof RuntimeConfig, string> = {
   preludeSdkTimeoutMs: 'NEXT_PUBLIC_PRELUDE_SDK_TIMEOUT_MS',
   plausibleDomain: 'NEXT_PUBLIC_PLAUSIBLE_DOMAIN',
   plausibleScriptUrl: 'NEXT_PUBLIC_PLAUSIBLE_SCRIPT_URL',
+  pulseClientKey: 'NEXT_PUBLIC_PULSE_CLIENT_KEY',
   previewImage: 'NEXT_PUBLIC_PREVIEW_IMAGE',
   siteName: 'NEXT_PUBLIC_SITE_NAME',
   locale: 'NEXT_PUBLIC_LOCALE',

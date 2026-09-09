@@ -9,6 +9,12 @@ export const MAX_CLIENT_NODES = 400;
 /** Visible-edge threshold that auto-engages declutter (once per session). */
 export const AUTO_DECLUTTER_EDGES = 600;
 
+/** Which affordance triggered an expansion. Reported as the `source` of `graph_node_expanded`. */
+export type GraphExpandSource = 'double_click' | 'panel' | 'refresh' | 'search_pick' | 'tag_chip';
+
+/** Which affordance started a path trace. Reported as the `via` of the path events. */
+export type GraphTraceVia = 'hover_card' | 'panel';
+
 /** Everything the legend can hide: relationship classes plus node kinds (store-persisted). */
 export type HideableClass = GraphNodeClass;
 
@@ -61,7 +67,7 @@ export type UseSocialGraphResult = {
   /** (Re)load the graph centered on a user */
   load: (pubky: Pubky) => void;
   /** Fetch a node's own neighborhood and merge it into the view, pruning around anchorId when given */
-  expand: (nodeId: string, anchorId?: string) => Promise<void>;
+  expand: (nodeId: string, anchorId?: string, source?: GraphExpandSource) => Promise<void>;
   /** Re-fetch a node's neighborhood even if it was already expanded */
   refreshNode: (nodeId: string) => Promise<void>;
   /** Merge a user's neighborhood in (search-to-add) and focus them */
@@ -78,6 +84,6 @@ export type UseSocialGraphResult = {
   setTimeCap: (cap: number | null) => void;
   toggleCommunities: () => void;
   /** Shortest-path trace from the signed-in user to a target user node */
-  tracePath: (targetPubky: Pubky) => Promise<void>;
+  tracePath: (targetPubky: Pubky, via?: GraphTraceVia) => Promise<void>;
   clearPath: () => void;
 };

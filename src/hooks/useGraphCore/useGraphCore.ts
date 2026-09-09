@@ -4,7 +4,12 @@ import { type MutableRefObject, useCallback, useMemo, useRef, useState } from 'r
 import { useTranslations } from 'next-intl';
 import { GraphController } from '@/controllers/graph/graph';
 import { useGraphProfileTags } from '@/hooks/useGraphProfileTags/useGraphProfileTags';
-import { type HideableClass, MAX_CLIENT_NODES } from '@/hooks/useSocialGraph/useSocialGraph.types';
+import {
+  type GraphExpandSource,
+  type GraphTraceVia,
+  type HideableClass,
+  MAX_CLIENT_NODES,
+} from '@/hooks/useSocialGraph/useSocialGraph.types';
 import {
   aggregateParallelEdges,
   applyDeclutter,
@@ -21,7 +26,16 @@ import {
   tierOf,
   type VisualGraphNode,
 } from '@/hooks/useSocialGraph/useSocialGraph.utils';
+import { isAppError, isNotFound } from '@/libs/error/error.utils';
 import { Logger } from '@/libs/logger/logger';
+import { pulseEvent, pulseOperation } from '@/libs/observability/pulse';
+import {
+  GRAPH_ERROR_EVENTS,
+  GRAPH_EVENTS,
+  GRAPH_METRICS,
+  pulseGraphError,
+  type Surface,
+} from '@/libs/observability/pulse.graph';
 import type { Pubky } from '@/models/models.types';
 import { toast } from '@/molecules/Toaster/use-toast';
 import type {
@@ -61,6 +75,7 @@ export type GraphCoreOptions = {
    * this off: its posts ARE the content being visualized.
    */
   capPostsByTier?: boolean;
+  surface: Surface;
 };
 
 export type GraphCore = {
@@ -107,11 +122,11 @@ export type GraphCore = {
   fetchKinds: string | undefined;
   // Actions
   mergeNeighborhood: (incoming: NexusGraph, parent: NexusGraphNode | null, anchorId?: string) => void;
-  expand: (nodeId: string, anchorId?: string) => Promise<void>;
+  expand: (nodeId: string, anchorId?: string, source?: GraphExpandSource) => Promise<void>;
   refreshNode: (nodeId: string) => Promise<void>;
   /** Merge a tag's neighborhood in and select its hub (chip click / search) */
   addTag: (label: string) => Promise<void>;
-  tracePath: (targetPubky: Pubky) => Promise<void>;
+  tracePath: (targetPubky: Pubky, via?: GraphTraceVia) => Promise<void>;
   clearPath: () => void;
 };
 
@@ -165,6 +180,7 @@ export function useGraphCore({
   deriveSizeRelationships,
   exemptFocus = false,
   capPostsByTier = true,
+  surface,
 }: GraphCoreOptions): GraphCore {
   const t = useTranslations('graph');
   const { currentUserPubky } = useAuthStore();
@@ -223,11 +239,12 @@ export function useGraphCore({
   );
 
   const doExpand = useCallback(
-    async (nodeId: string, force: boolean, anchorId?: string) => {
+    async (nodeId: string, force: boolean, anchorId?: string, source?: GraphExpandSource) => {
       const node = graph.nodes.find((n) => n.id === nodeId);
       if (!node || isExpanding) return;
       if (!force && expandedIds.has(nodeId)) return;
       const nonce = loadNonce.current;
+      const op = pulseOperation(GRAPH_METRICS.NODE_EXPAND, { surface, kind: node.kind });
       setIsExpanding(true);
       try {
         const neighborhood = await GraphController.fetchNeighborhood(
@@ -235,25 +252,45 @@ export function useGraphCore({
           currentUserPubky,
         );
         // A newer load() replaced the graph while we were in flight
-        if (nonce !== loadNonce.current) return;
+        if (nonce !== loadNonce.current) {
+          // Superseded work is neither a success nor a failure
+          op.cancel();
+          return;
+        }
         // Recenter passes the clicked node as anchor: focus state has not
         // committed yet in the same handler, so resolveAnchor would prune
         // around the OLD focus and could evict the just-clicked cluster
         mergeNeighborhood(neighborhood, node, anchorId);
         setExpandedIds((prev) => new Set(prev).add(nodeId));
+        const known = new Set(graph.nodes.map((n) => n.id));
+        const added = neighborhood.nodes.reduce((total, n) => total + (known.has(n.id) ? 0 : 1), 0);
+        const counts = { added_nodes: String(added), total_nodes: String(graph.nodes.length + added) };
+        pulseEvent(GRAPH_EVENTS.NODE_EXPANDED, {
+          surface,
+          // A recenter expands as a side effect with no affordance to name, so it omits `source`
+          ...(source ? { source } : {}),
+          kind: node.kind,
+          ...counts,
+        });
+        op.complete(counts);
       } catch (err) {
         // Non-fatal: the current graph stays untouched
         Logger.error(`${logTag}: failed to expand node`, err);
         toast({ description: t('states.expandError') });
+        pulseGraphError(err, GRAPH_ERROR_EVENTS.EXPAND_FAILED, { surface, kind: node.kind });
+        op.fail(err);
       } finally {
         setIsExpanding(false);
       }
     },
-    [graph, expandedIds, isExpanding, mergeNeighborhood, currentUserPubky, fetchKinds, logTag, t],
+    [graph, expandedIds, isExpanding, mergeNeighborhood, currentUserPubky, fetchKinds, logTag, surface, t],
   );
 
-  const expand = useCallback((nodeId: string, anchorId?: string) => doExpand(nodeId, false, anchorId), [doExpand]);
-  const refreshNode = useCallback((nodeId: string) => doExpand(nodeId, true), [doExpand]);
+  const expand = useCallback(
+    (nodeId: string, anchorId?: string, source?: GraphExpandSource) => doExpand(nodeId, false, anchorId, source),
+    [doExpand],
+  );
+  const refreshNode = useCallback((nodeId: string) => doExpand(nodeId, true, undefined, 'refresh'), [doExpand]);
 
   /**
    * Merge a tag's neighborhood in (chip click / search-to-add) and select its
@@ -285,32 +322,54 @@ export function useGraphCore({
       } catch (err) {
         Logger.error(`${logTag}: failed to add tag`, err);
         toast({ description: t('states.expandError') });
+        pulseGraphError(err, GRAPH_ERROR_EVENTS.ADD_TAG_FAILED, { surface });
       } finally {
         setIsExpanding(false);
       }
     },
-    [graph, loadNonce, currentUserPubky, mergeNeighborhood, logTag, t],
+    [graph, loadNonce, currentUserPubky, mergeNeighborhood, logTag, surface, t],
   );
 
   const tracePath = useCallback(
-    async (targetPubky: Pubky) => {
+    async (targetPubky: Pubky, via?: GraphTraceVia) => {
       if (!currentUserPubky || isTracing) return;
       const nonce = loadNonce.current;
+      const attrs = { surface, ...(via ? { via } : {}) };
+      const op = pulseOperation(GRAPH_METRICS.PATH_TRACE, attrs);
       setIsTracing(true);
       try {
         const path = await GraphController.fetchPath({ from: currentUserPubky, to: targetPubky }, currentUserPubky);
-        if (nonce !== loadNonce.current) return;
+        if (nonce !== loadNonce.current) {
+          op.cancel();
+          return;
+        }
         const me = graph.nodes.find((n) => n.id === `user:${currentUserPubky}`) ?? null;
         mergeNeighborhood(path, me, me?.id);
         setPathIds(path.nodes.map((n) => n.id));
+        if (path.nodes.length === 0) {
+          pulseEvent(GRAPH_EVENTS.PATH_NOT_FOUND, { ...attrs, reason: 'empty' });
+          op.complete({ found: 'false' });
+        } else {
+          const hops = String(Math.max(0, path.nodes.length - 1));
+          pulseEvent(GRAPH_EVENTS.PATH_TRACED, { ...attrs, hops });
+          op.complete({ found: 'true', hops });
+        }
       } catch (err) {
         Logger.error(`${logTag}: failed to trace path`, err);
         toast({ description: t('states.noPath') });
+        if (isAppError(err) && isNotFound(err)) {
+          // The backend answered: there is no path. An outcome, not a failure
+          pulseEvent(GRAPH_EVENTS.PATH_NOT_FOUND, { ...attrs, reason: 'not_found' });
+          op.complete({ found: 'false' });
+        } else {
+          pulseGraphError(err, GRAPH_ERROR_EVENTS.PATH_FAILED, attrs);
+          op.fail(err);
+        }
       } finally {
         setIsTracing(false);
       }
     },
-    [currentUserPubky, isTracing, graph, mergeNeighborhood, logTag, t],
+    [currentUserPubky, isTracing, graph, mergeNeighborhood, logTag, surface, t],
   );
 
   // Full timestamp range of the raw graph (slider bounds)

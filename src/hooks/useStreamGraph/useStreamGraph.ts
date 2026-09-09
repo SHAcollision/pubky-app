@@ -5,7 +5,11 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { PostController } from '@/controllers/post/post';
 import { UserController } from '@/controllers/user/user';
 import { markBirths, type SimNode, useGraphCore } from '@/hooks/useGraphCore/useGraphCore';
-import { type HideableClass } from '@/hooks/useSocialGraph/useSocialGraph.types';
+import {
+  type GraphExpandSource,
+  type GraphTraceVia,
+  type HideableClass,
+} from '@/hooks/useSocialGraph/useSocialGraph.types';
 import {
   type GraphRelationship,
   type GraphTier,
@@ -15,6 +19,7 @@ import {
   type VisualGraphNode,
 } from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { Logger } from '@/libs/logger/logger';
+import { FEED_SURFACE, GRAPH_ERROR_EVENTS, pulseGraphError, pulseGraphWarn } from '@/libs/observability/pulse.graph';
 import type { Pubky } from '@/models/models.types';
 import type { NexusGraph, NexusGraphEdge, NexusGraphNode } from '@/services/nexus/graph/graph.types';
 import { useAuthStore } from '@/stores/auth/auth.store';
@@ -47,13 +52,13 @@ export type UseStreamGraphResult = {
   isExpanding: boolean;
   isTracing: boolean;
   select: (id: string | null) => void;
-  expand: (nodeId: string, anchorId?: string) => Promise<void>;
+  expand: (nodeId: string, anchorId?: string, source?: GraphExpandSource) => Promise<void>;
   refreshNode: (nodeId: string) => Promise<void>;
   /** Design click behavior: focus + one-time expand pruned around the clicked user */
   recenter: (nodeId: string) => Promise<void>;
   /** Merge a tag's neighborhood in and select its hub (chip click) */
   addTag: (label: string) => Promise<void>;
-  tracePath: (pubky: Pubky) => Promise<void>;
+  tracePath: (pubky: Pubky, via?: GraphTraceVia) => Promise<void>;
   clearPath: () => void;
   toggleClass: (cls: HideableClass) => void;
   toggleDeclutter: () => void;
@@ -77,6 +82,8 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
   const [focusOverride, setFocusOverride] = useState<string | null>(null);
   const gatherNonce = useRef(0);
   const seededFor = useRef<Pubky | null>(null);
+  // The live query re-runs on every graph mutation; its failure is reported once per mount
+  const relsFailureReported = useRef(false);
 
   const postKey = postIds.join(',');
   const meNodeId = currentUserPubky ? `user:${currentUserPubky}` : null;
@@ -126,6 +133,7 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
     deriveSizeRelationships,
     // The feed's posts ARE the content; never thin them to the design cap
     capPostsByTier: false,
+    surface: FEED_SURFACE,
   });
   const { graph, setGraph, expandedIds, expand } = core;
 
@@ -160,6 +168,7 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
       } catch (err) {
         // Non-fatal: the stream synthesis still renders
         Logger.error('useStreamGraph: failed to seed viewer node', err);
+        pulseGraphWarn(err, GRAPH_ERROR_EVENTS.SEED_VIEWER_FAILED, { surface: FEED_SURFACE });
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -243,6 +252,7 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
         });
       } catch (err) {
         Logger.error('useStreamGraph: failed to synthesize stream graph', err);
+        pulseGraphError(err, GRAPH_ERROR_EVENTS.STREAM_SYNTHESIS_FAILED, { surface: FEED_SURFACE });
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -263,6 +273,10 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
       return map;
     } catch (error) {
       Logger.error('useStreamGraph: failed to query author relationships', { error });
+      if (!relsFailureReported.current) {
+        relsFailureReported.current = true;
+        pulseGraphWarn(error, GRAPH_ERROR_EVENTS.STREAM_RELS_FAILED, { surface: FEED_SURFACE });
+      }
       return EMPTY_RELS;
     }
   }, [pubkyKey]);

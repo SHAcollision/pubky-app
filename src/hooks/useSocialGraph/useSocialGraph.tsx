@@ -5,6 +5,15 @@ import { useTranslations } from 'next-intl';
 import { GraphController } from '@/controllers/graph/graph';
 import { useGraphCore } from '@/hooks/useGraphCore/useGraphCore';
 import { Logger } from '@/libs/logger/logger';
+import { pulseEvent, pulseOperation, pulseStep, pulseWarn } from '@/libs/observability/pulse';
+import {
+  EXPLORER_SURFACE,
+  GRAPH_ERROR_EVENTS,
+  GRAPH_EVENTS,
+  GRAPH_FUNNEL_STEPS,
+  GRAPH_METRICS,
+  pulseGraphError,
+} from '@/libs/observability/pulse.graph';
 import type { Pubky } from '@/models/models.types';
 import { toast } from '@/molecules/Toaster/use-toast';
 import type { NexusGraph, NexusGraphEdge, NexusGraphNode } from '@/services/nexus/graph/graph.types';
@@ -33,6 +42,8 @@ export function useSocialGraph(): UseSocialGraphResult {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(false);
   const autoDecluttered = useRef(false);
+  // Once per mount: StrictMode and every retry re-enter load()
+  const loadedStep = useRef(false);
 
   const { currentUserPubky: viewerPubky } = useAuthStore();
   const meNodeId = viewerPubky ? `user:${viewerPubky}` : null;
@@ -62,6 +73,7 @@ export function useSocialGraph(): UseSocialGraphResult {
     deriveRelationships,
     deriveSizeRelationships,
     exemptFocus: true,
+    surface: EXPLORER_SURFACE,
   });
   const {
     graph,
@@ -88,22 +100,47 @@ export function useSocialGraph(): UseSocialGraphResult {
       select(null);
       setPathIds(null);
       setTimeCap(null);
+      const op = pulseOperation(GRAPH_METRICS.NEIGHBORHOOD_LOAD, { surface: EXPLORER_SURFACE });
+      const startedAt = Date.now();
       try {
         const neighborhood = await GraphController.fetchNeighborhood(
           { kind: 'user', id: pubky, depth: 1, ...(core.fetchKinds ? { kinds: core.fetchKinds } : {}) },
           currentUserPubky,
         );
-        if (nonce !== loadNonce.current) return;
+        if (nonce !== loadNonce.current) {
+          op.cancel();
+          return;
+        }
         setGraph(neighborhood);
         setFocusId(`user:${pubky}`);
         setExpandedIds(new Set([`user:${pubky}`]));
         const center = neighborhood.nodes.find((n) => n.id === `user:${pubky}`);
         const entry = center && trailEntryOf(center);
         setTrail(entry ? [entry] : []);
+        const counts = {
+          node_count: String(neighborhood.nodes.length),
+          edge_count: String(neighborhood.edges.length),
+        };
+        pulseEvent(GRAPH_EVENTS.LOADED, {
+          surface: EXPLORER_SURFACE,
+          ...counts,
+          duration_ms: String(Date.now() - startedAt),
+          is_empty: String(neighborhood.nodes.length <= 1),
+        });
+        op.complete(counts);
+        if (!loadedStep.current && neighborhood.nodes.length > 1) {
+          loadedStep.current = true;
+          pulseStep(GRAPH_FUNNEL_STEPS.LOADED);
+        }
       } catch (err) {
-        if (nonce !== loadNonce.current) return;
+        if (nonce !== loadNonce.current) {
+          op.cancel();
+          return;
+        }
         Logger.error('useSocialGraph: failed to load graph', err);
         setError(true);
+        pulseGraphError(err, GRAPH_ERROR_EVENTS.LOAD_FAILED, { surface: EXPLORER_SURFACE });
+        op.fail(err);
       } finally {
         if (nonce === loadNonce.current) setIsLoading(false);
       }
@@ -153,6 +190,7 @@ export function useSocialGraph(): UseSocialGraphResult {
       } catch (err) {
         Logger.error('useSocialGraph: failed to add user', err);
         toast({ description: t('states.expandError') });
+        pulseGraphError(err, GRAPH_ERROR_EVENTS.ADD_USER_FAILED, { surface: EXPLORER_SURFACE });
       } finally {
         setIsExpanding(false);
       }
@@ -212,6 +250,7 @@ export function useSocialGraph(): UseSocialGraphResult {
     autoDecluttered.current = true;
     setDeclutter(true);
     toast({ description: t('states.autoDeclutter') });
+    pulseWarn(GRAPH_EVENTS.AUTO_DECLUTTERED, { surface: EXPLORER_SURFACE, edge_count: String(realEdgeCount) });
   }, [realEdgeCount, setDeclutter, t]);
 
   return {

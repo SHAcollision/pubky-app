@@ -23,6 +23,10 @@ if (shouldEnableSentry()) {
   });
 }
 
+// Pulse is NOT initialized here: Next requires this module before `appBootstrap()` runs the
+// `beforeInteractive` queue that assigns `window.__PUBKY_CONFIG__`, so the gate would read as
+// disabled and never recover. `initPulse()` runs from `@/atoms/PulseInit/PulseInit` instead.
+
 /**
  * Next.js framework convention export — discovered by name from this module.
  *
