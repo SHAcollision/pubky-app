@@ -31,7 +31,6 @@ export function SocialGraphAdvancedPanel({
   legend,
   className,
 }: SocialGraphAdvancedPanelProps) {
-
   const toggles = [
     { label: 'Declutter', checked: declutter, onChange: onToggleDeclutter, dataCy: 'graph-declutter' },
     {

@@ -27,7 +27,6 @@ export function SocialGraphControls({
   onToggleFullscreen,
   className,
 }: SocialGraphControlsProps) {
-
   return (
     <div className={cn('flex items-center gap-3 lg:gap-6', className)} data-cy="graph-controls">
       <Button
@@ -107,9 +106,9 @@ export function SocialGraphControls({
         size="icon"
         className={cn(GRAPH_PILL_CLASS, isFullscreen && GRAPH_PILL_ACTIVE_CLASS)}
         onClick={onToggleFullscreen}
-        aria-label={(isFullscreen ? 'Exit fullscreen' : 'Fullscreen')}
+        aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
         aria-pressed={isFullscreen}
-        title={(isFullscreen ? 'Exit fullscreen' : 'Fullscreen')}
+        title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
         data-cy="graph-fullscreen"
       >
         {isFullscreen ? <Shrink className="size-4" /> : <Expand className="size-4" />}

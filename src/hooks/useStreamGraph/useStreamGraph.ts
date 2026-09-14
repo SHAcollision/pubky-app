@@ -162,6 +162,8 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
         Logger.error('useStreamGraph: failed to seed viewer node', err);
       }
     })();
+    // Runs once per signed-in user: `core` is a fresh object every render and
+    // `setGraph`/`mergeNeighborhood` are only read inside the async body
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUserPubky]);
 
@@ -176,6 +178,8 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
       for (const label of pinnedTagLabels) next.add(`tag:${label}`);
       return next.size === prev.size ? prev : next;
     });
+    // `pinnedTagLabels` is a new array every render; `pinnedKey` is its
+    // stable identity, and `core.setExpandedIds` is a state setter
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinnedKey, graph]);
 
@@ -190,9 +194,19 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
     [graph, meNodeId, expandedIds, expand],
   );
 
-  // Gather the stream's already-cached data and merge the synthesized graph in
+  // Gather the stream's already-cached data and merge the synthesized graph
+  // in. Pagination appends to the previous ids and merges; anything else (a
+  // new feed, a filter change, a refresh, a mute) is a replacement and starts
+  // from the viewer seed again, otherwise the old stream's posts would linger.
+  const prevPostIds = useRef<string[]>([]);
   useEffect(() => {
     const nonce = ++gatherNonce.current;
+    const prev = prevPostIds.current;
+    prevPostIds.current = postIds;
+    const isAppend = prev.length > 0 && postIds.length >= prev.length && prev.every((id, i) => postIds[i] === id);
+    if (!isAppend) {
+      setGraph((g) => ({ nodes: g.nodes.filter((n) => n.id === meNodeId), edges: [] }));
+    }
     if (postIds.length === 0) return;
     (async () => {
       try {
@@ -245,6 +259,8 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
         Logger.error('useStreamGraph: failed to synthesize stream graph', err);
       }
     })();
+    // `postIds` is a new array every render; `postKey` is its stable identity.
+    // `meNodeId` and `setGraph` are only read inside the effect body
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postKey]);
 

@@ -5,7 +5,7 @@ import { GraphController } from '@/controllers/graph/graph';
 import { useGraphCore } from '@/hooks/useGraphCore/useGraphCore';
 import { Logger } from '@/libs/logger/logger';
 import type { Pubky } from '@/models/models.types';
-import { toast } from '@/molecules/Toaster/use-toast';
+import { toast } from '@/molecules/Toaster/toast';
 import type { NexusGraph, NexusGraphEdge, NexusGraphNode } from '@/services/nexus/graph/graph.types';
 import { useAuthStore } from '@/stores/auth/auth.store';
 import { useGraphStore } from '@/stores/graph/graph.store';
@@ -64,7 +64,7 @@ export function useSocialGraph(): UseSocialGraphResult {
   const {
     graph,
     setGraph,
-    loadNonce,
+    loadNonceRef,
     currentUserPubky,
     expandedIds,
     expand,
@@ -80,7 +80,7 @@ export function useSocialGraph(): UseSocialGraphResult {
 
   const load = useCallback(
     async (pubky: Pubky) => {
-      const nonce = ++loadNonce.current;
+      const nonce = ++loadNonceRef.current;
       setIsLoading(true);
       setError(false);
       select(null);
@@ -91,7 +91,7 @@ export function useSocialGraph(): UseSocialGraphResult {
           { kind: 'user', id: pubky, depth: 1, ...(core.fetchKinds ? { kinds: core.fetchKinds } : {}) },
           currentUserPubky,
         );
-        if (nonce !== loadNonce.current) return;
+        if (nonce !== loadNonceRef.current) return;
         setGraph(neighborhood);
         setFocusId(`user:${pubky}`);
         setExpandedIds(new Set([`user:${pubky}`]));
@@ -99,14 +99,14 @@ export function useSocialGraph(): UseSocialGraphResult {
         const entry = center && trailEntryOf(center);
         setTrail(entry ? [entry] : []);
       } catch (err) {
-        if (nonce !== loadNonce.current) return;
+        if (nonce !== loadNonceRef.current) return;
         Logger.error('useSocialGraph: failed to load graph', err);
         setError(true);
       } finally {
-        if (nonce === loadNonce.current) setIsLoading(false);
+        if (nonce === loadNonceRef.current) setIsLoading(false);
       }
     },
-    [loadNonce, currentUserPubky, core.fetchKinds, select, setPathIds, setTimeCap, setGraph, setExpandedIds],
+    [loadNonceRef, currentUserPubky, core.fetchKinds, select, setPathIds, setTimeCap, setGraph, setExpandedIds],
   );
 
   const focus = useCallback(
@@ -131,14 +131,14 @@ export function useSocialGraph(): UseSocialGraphResult {
         focus(nodeId);
         return;
       }
-      const nonce = loadNonce.current;
+      const nonce = loadNonceRef.current;
       setIsExpanding(true);
       try {
         const neighborhood = await GraphController.fetchNeighborhood(
           { kind: 'user', id: pubky, depth: 1, ...(core.fetchKinds ? { kinds: core.fetchKinds } : {}) },
           currentUserPubky,
         );
-        if (nonce !== loadNonce.current) return;
+        if (nonce !== loadNonceRef.current) return;
         // Anchor the prune on the incoming center: a disconnected search-added
         // cluster is otherwise "infinitely far" from the old focus and gets
         // evicted the moment it lands
@@ -155,7 +155,7 @@ export function useSocialGraph(): UseSocialGraphResult {
         setIsExpanding(false);
       }
     },
-    [graph, focus, loadNonce, currentUserPubky, core.fetchKinds, mergeNeighborhood, setExpandedIds, setIsExpanding, t],
+    [graph, focus, loadNonceRef, currentUserPubky, core.fetchKinds, mergeNeighborhood, setExpandedIds, setIsExpanding],
   );
 
   /**
@@ -210,7 +210,7 @@ export function useSocialGraph(): UseSocialGraphResult {
     autoDecluttered.current = true;
     setDeclutter(true);
     toast({ description: 'Dense graph: declutter is on. Toggle it in the controls.' });
-  }, [realEdgeCount, setDeclutter, t]);
+  }, [realEdgeCount, setDeclutter]);
 
   return {
     nodes: core.nodes,

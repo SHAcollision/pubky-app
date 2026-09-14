@@ -62,6 +62,7 @@ const props = {
   postIds: ['a:1'],
   loading: false,
   loadingMore: false,
+  error: null,
   hasMore: true,
   loadMore: vi.fn(),
 };

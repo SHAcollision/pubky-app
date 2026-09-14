@@ -15,7 +15,7 @@ vi.mock('@/controllers/post/post', () => ({
 vi.mock('@/controllers/user/user', () => ({
   UserController: { getManyDetails: vi.fn(), getManyRelationships: vi.fn() },
 }));
-vi.mock('@/molecules/Toaster/use-toast', () => ({ toast: vi.fn() }));
+vi.mock('@/molecules/Toaster/toast', () => ({ toast: vi.fn() }));
 vi.mock('@/libs/logger/logger', () => ({
   Logger: { error: vi.fn(), info: vi.fn(), debug: vi.fn(), warn: vi.fn() },
 }));

@@ -65,6 +65,11 @@ export function Graph() {
   const isMobile = useIsMobile();
   const { load } = graph;
 
+  const focusAndCenter = (id: string) => {
+    graph.focus(id);
+    canvasRef.current?.centerOn(id);
+  };
+
   // QA/debug surface for the cypress interaction audit (debug builds only)
   const { focusId: graphFocusId, pathIds: graphPathIds } = graph;
   useGraphDebug(canvasRef, {
@@ -343,10 +348,7 @@ export function Graph() {
         onProofHover={spotlightProof}
         onExpand={graph.expand}
         onRefreshNode={graph.refreshNode}
-        onFocus={(id) => {
-          graph.focus(id);
-          canvasRef.current?.centerOn(id);
-        }}
+        onFocus={focusAndCenter}
         onTracePath={graph.tracePath}
         isTracing={graph.isTracing}
         onClose={() => graph.select(null)}
@@ -568,7 +570,11 @@ export function Graph() {
             >
               <Users className="size-8 text-muted-foreground" />
               <Typography as="p" className="text-muted-foreground">
-                {!centerPubky && !hasContent ? 'Sign in, or search for a user or tag to explore the graph.' : graph.error ? 'Could not load the graph.' : 'Nothing to explore yet. Follow people to grow your graph.'}
+                {!centerPubky && !hasContent
+                  ? 'Sign in, or search for a user or tag to explore the graph.'
+                  : graph.error
+                    ? 'Could not load the graph.'
+                    : 'Nothing to explore yet. Follow people to grow your graph.'}
               </Typography>
               {graph.error && centerPubky && (
                 <Button variant="secondary" onClick={() => load(centerPubky)} data-cy="graph-retry">

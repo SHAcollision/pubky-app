@@ -25,7 +25,7 @@ export class NexusGraphService {
   }
 
   /**
-   * Retrieves the shortest FOLLOWS path between two users (max 6 hops)
+   * Retrieves the shortest FOLLOWS path between two users (max 4 hops)
    *
    * @param params - from/to pubkies
    * @returns Path graph; nodes are ordered along the path

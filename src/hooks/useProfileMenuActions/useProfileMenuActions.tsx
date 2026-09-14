@@ -87,6 +87,9 @@ export function useProfileMenuActions(userId: string): UseProfileMenuActionsResu
           variant: 'error',
           description: isAppError(error) ? error.message : 'Could not copy to clipboard',
         });
+      }
+    },
+  });
 
   // Open in graph explorer
   menuItems.push({
@@ -95,9 +98,6 @@ export function useProfileMenuActions(userId: string): UseProfileMenuActionsResu
     icon: Waypoints,
     onClick: async () => {
       router.push(`${APP_ROUTES.GRAPH}?user=${userId}`);
-    },
-  });
-      }
     },
   });
 

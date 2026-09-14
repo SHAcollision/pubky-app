@@ -309,6 +309,7 @@ function TimelineFeedContent({
               postIds={postIds}
               loading={loading}
               loadingMore={loadingMore}
+              error={error}
               hasMore={hasMore}
               loadMore={loadMore}
             />

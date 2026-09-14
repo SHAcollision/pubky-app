@@ -6,7 +6,6 @@ import { useSearchCriteria } from '@/hooks/useSearchCriteria/useSearchCriteria';
 import { useSearchInput } from '@/hooks/useSearchInput/useSearchInput';
 import { useTagSearch } from '@/hooks/useTagSearch/useTagSearch';
 import { toast } from '@/molecules/Toaster/toast';
-import type { Pubky } from '@/models/models.types';
 import { useGraphStore } from '@/stores/graph/graph.store';
 import { useSearchStore } from '@/stores/search/search.store';
 import { resetViewport, setMobileViewport } from '@/test-utils/viewport';

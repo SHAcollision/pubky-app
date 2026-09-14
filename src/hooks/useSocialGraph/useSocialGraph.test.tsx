@@ -9,7 +9,7 @@ vi.mock('@/controllers/graph/graph', () => ({
   GraphController: { fetchNeighborhood: vi.fn(), fetchPath: vi.fn() },
 }));
 
-vi.mock('@/molecules/Toaster/use-toast', () => ({
+vi.mock('@/molecules/Toaster/toast', () => ({
   toast: vi.fn(),
 }));
 

@@ -19,6 +19,7 @@ import { GraphTimeMachine } from '@/molecules/GraphTimeMachine/GraphTimeMachine'
 import { SocialGraphAdvancedPanel } from '@/molecules/SocialGraphAdvancedPanel/SocialGraphAdvancedPanel';
 import { SocialGraphControls } from '@/molecules/SocialGraphControls/SocialGraphControls';
 import { SocialGraphLegend } from '@/molecules/SocialGraphLegend/SocialGraphLegend';
+import { TimelineError } from '@/molecules/Timeline/TimelineError';
 import { GraphUserHoverCard } from '@/organisms/GraphUserHoverCard/GraphUserHoverCard';
 import { SocialGraph } from '@/organisms/SocialGraph/SocialGraph';
 import type { SocialGraphHandle } from '@/organisms/SocialGraph/SocialGraph.types';
@@ -31,6 +32,7 @@ export interface StreamGraphPostsProps {
   postIds: string[];
   loading: boolean;
   loadingMore: boolean;
+  error: string | null;
   hasMore: boolean;
   loadMore: () => void;
   className?: string;
@@ -50,6 +52,7 @@ export function StreamGraphPosts({
   postIds,
   loading,
   loadingMore,
+  error,
   hasMore,
   loadMore,
   className,
@@ -297,9 +300,9 @@ export function StreamGraphPosts({
 
       {graph.selectedNode && (
         <SocialGraphNodePanel
-          // Above the controls (z-10) so the pills never cover the panel's
-          // close button, below the sticky header (20) this card scrolls under
-          className="absolute top-3 right-3 z-[15] max-h-[calc(100%-1.5rem)] max-w-[calc(100%-5rem)] overflow-y-auto"
+          // Same z-10 layer as the controls; it renders after them in the DOM, so
+          // it paints on top and the pills never cover its close button
+          className="absolute top-3 right-3 z-10 max-h-[calc(100%-1.5rem)] max-w-[calc(100%-5rem)] overflow-y-auto"
           node={graph.selectedNode}
           relationship={graph.relationships.get(graph.selectedNode.id) ?? 'extended'}
           isExpanded={graph.expandedIds.has(graph.selectedNode.id)}
@@ -331,6 +334,8 @@ export function StreamGraphPosts({
           onPointerLeave={() => setHoverCard(null)}
         />
       )}
+
+      {error && <TimelineError message={error} className="absolute top-20 right-6 left-6 z-10" />}
 
       {hasMore && !isEmpty && (
         <Button

@@ -1,6 +1,6 @@
 'use client';
 
-import { type MutableRefObject, useCallback, useMemo, useRef, useState } from 'react';
+import { type MutableRefObject, useEffect, useMemo, useRef, useState } from 'react';
 import { GraphController } from '@/controllers/graph/graph';
 import { useGraphProfileTags } from '@/hooks/useGraphProfileTags/useGraphProfileTags';
 import { type HideableClass, MAX_CLIENT_NODES } from '@/hooks/useSocialGraph/useSocialGraph.types';
@@ -22,7 +22,7 @@ import {
 } from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { Logger } from '@/libs/logger/logger';
 import type { Pubky } from '@/models/models.types';
-import { toast } from '@/molecules/Toaster/use-toast';
+import { toast } from '@/molecules/Toaster/toast';
 import type {
   NexusGraph,
   NexusGraphEdge,
@@ -66,7 +66,7 @@ export type GraphCore = {
   graph: NexusGraph;
   setGraph: React.Dispatch<React.SetStateAction<NexusGraph>>;
   /** Bumped by a full reload; in-flight expansions/traces from before are dropped */
-  loadNonce: MutableRefObject<number>;
+  loadNonceRef: MutableRefObject<number>;
   currentUserPubky: Pubky | null;
   // Selection
   selectedId: string | null;
@@ -143,6 +143,38 @@ export function markBirths(prev: NexusGraph, incoming: NexusGraph, parent: Nexus
   }
 }
 
+/** Full timestamp range of the raw graph (slider bounds). */
+function timeBoundsOf(graph: NexusGraph): { min: number; max: number } | null {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const edge of graph.edges) {
+    if (edge.indexed_at !== undefined) {
+      min = Math.min(min, edge.indexed_at);
+      max = Math.max(max, edge.indexed_at);
+    }
+  }
+  for (const node of graph.nodes) {
+    if (node.kind === 'post' && node.indexed_at > 0) {
+      min = Math.min(min, node.indexed_at);
+      max = Math.max(max, node.indexed_at);
+    }
+  }
+  return min < max ? { min, max } : null;
+}
+
+/**
+ * Sorted event timeline for constant-rate playback. Derived from the RAW
+ * graph on purpose: the visible edge set shrinks under the moving cap, and
+ * stamps derived from it would change identity on every playback tick,
+ * restarting the player at index zero forever.
+ */
+function timelineStampsOf(graph: NexusGraph): number[] {
+  const stamps: number[] = [];
+  for (const edge of graph.edges) if (edge.indexed_at !== undefined) stamps.push(edge.indexed_at);
+  for (const node of graph.nodes) if (node.kind === 'post' && node.indexed_at > 0) stamps.push(node.indexed_at);
+  return stamps.sort((a, b) => a - b);
+}
+
 /**
  * useGraphCore
  *
@@ -174,7 +206,7 @@ export function useGraphCore({
     toggleDeclutter,
     setDeclutter,
   } = useGraphStore();
-  const [graph, setGraph] = useState<NexusGraph>(EMPTY_GRAPH);
+  const [graph, setGraphState] = useState<NexusGraph>(EMPTY_GRAPH);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [pathIds, setPathIds] = useState<string[] | null>(null);
@@ -182,76 +214,76 @@ export function useGraphCore({
   const [isExpanding, setIsExpanding] = useState(false);
   const [isTracing, setIsTracing] = useState(false);
   // Guards against a stale expansion/trace resolving after a newer load started
-  const loadNonce = useRef(0);
-  // Chip node objects survive recomputes so the sim never resets their layout
-  const satelliteCache = useRef(new Map());
+  const loadNonceRef = useRef(0);
+  // Chip node objects survive recomputes so the sim never resets their layout.
+  // Held in state (never replaced) rather than a ref: the pipeline below runs
+  // during render, where refs may not be read
+  const [satelliteCache] = useState(() => new Map());
   // Last committed opacity tiers, kept while a recenter expansion is in flight
   // so the canvas does not flash all-dim before the new focus's edges merge
-  const opacityTiersRef = useRef<Map<string, GraphTier>>(new Map());
+  const [heldOpacityTiers, setHeldOpacityTiers] = useState<Map<string, GraphTier>>(() => new Map());
+  // Wall clock of the last graph mutation, stamped by the handlers that mutate
+  // it: render must stay pure, and chips born in a recompute belong to that moment
+  const [mutatedAt, setMutatedAt] = useState(0);
+  const setGraph: typeof setGraphState = (update) => {
+    setMutatedAt(Date.now());
+    setGraphState(update);
+  };
 
-  const hiddenClasses = useMemo(() => new Set<HideableClass>(hiddenClassList), [hiddenClassList]);
+  const hiddenClasses = new Set<HideableClass>(hiddenClassList);
   const focusId = typeof focusIdOption === 'function' ? focusIdOption(graph) : focusIdOption;
   // Default view fetches no shared tag hubs; the advanced pref restores them
   const fetchKinds = tagHubsOn ? undefined : 'user,post';
 
   // One bulk live query behind every profile-tag chip on the canvas
-  const userPubkys = useMemo(() => graph.nodes.flatMap((n) => (n.kind === 'user' ? [n.pubky] : [])), [graph]);
+  const userPubkys = graph.nodes.flatMap((n) => (n.kind === 'user' ? [n.pubky] : []));
   const tagsMap = useGraphProfileTags(userPubkys);
 
-  const mergeNeighborhood = useCallback(
-    (incoming: NexusGraph, parent: NexusGraphNode | null, anchorId?: string) => {
-      // Computed against the closed-over graph (all callers depend on it), not
-      // inside the updater: React defers queued updaters, which would race the
-      // pruned-count toast below
-      markBirths(graph, incoming, parent);
-      const merged = mergeGraph(graph, incoming);
-      const result = pruneToBudget(
-        merged,
-        { focusId: anchorId ?? resolveAnchor(graph, parent), selectedId, expandedIds },
-        MAX_CLIENT_NODES,
-      );
-      setGraph(result.graph);
-      if (result.evictedIds.size > 0) {
-        // A node whose neighborhood was evicted must become expandable again
-        setExpandedIds((prev) => new Set([...prev].filter((id) => !result.evictedIds.has(id))));
-      }
-      if (result.pruned > 0) toast({ description: 'Graph is full: distant nodes were hidden.' });
-    },
-    [graph, resolveAnchor, selectedId, expandedIds, t],
-  );
+  const mergeNeighborhood = (incoming: NexusGraph, parent: NexusGraphNode | null, anchorId?: string) => {
+    // Computed against the closed-over graph (all callers depend on it), not
+    // inside the updater: React defers queued updaters, which would race the
+    // pruned-count toast below
+    markBirths(graph, incoming, parent);
+    const merged = mergeGraph(graph, incoming);
+    const result = pruneToBudget(
+      merged,
+      { focusId: anchorId ?? resolveAnchor(graph, parent), selectedId, expandedIds },
+      MAX_CLIENT_NODES,
+    );
+    setGraph(result.graph);
+    if (result.evictedIds.size > 0) {
+      // A node whose neighborhood was evicted must become expandable again
+      setExpandedIds((prev) => new Set([...prev].filter((id) => !result.evictedIds.has(id))));
+    }
+    if (result.pruned > 0) toast({ description: 'Graph is full: distant nodes were hidden.' });
+  };
 
-  const doExpand = useCallback(
-    async (nodeId: string, force: boolean, anchorId?: string) => {
-      const node = graph.nodes.find((n) => n.id === nodeId);
-      if (!node || isExpanding) return;
-      if (!force && expandedIds.has(nodeId)) return;
-      const nonce = loadNonce.current;
-      setIsExpanding(true);
-      try {
-        const neighborhood = await GraphController.fetchNeighborhood(
-          expandParamsOf(node, fetchKinds),
-          currentUserPubky,
-        );
-        // A newer load() replaced the graph while we were in flight
-        if (nonce !== loadNonce.current) return;
-        // Recenter passes the clicked node as anchor: focus state has not
-        // committed yet in the same handler, so resolveAnchor would prune
-        // around the OLD focus and could evict the just-clicked cluster
-        mergeNeighborhood(neighborhood, node, anchorId);
-        setExpandedIds((prev) => new Set(prev).add(nodeId));
-      } catch (err) {
-        // Non-fatal: the current graph stays untouched
-        Logger.error(`${logTag}: failed to expand node`, err);
-        toast({ description: 'Could not expand this node.' });
-      } finally {
-        setIsExpanding(false);
-      }
-    },
-    [graph, expandedIds, isExpanding, mergeNeighborhood, currentUserPubky, fetchKinds, logTag, t],
-  );
+  const doExpand = async (nodeId: string, force: boolean, anchorId?: string) => {
+    const node = graph.nodes.find((n) => n.id === nodeId);
+    if (!node || isExpanding) return;
+    if (!force && expandedIds.has(nodeId)) return;
+    const nonce = loadNonceRef.current;
+    setIsExpanding(true);
+    try {
+      const neighborhood = await GraphController.fetchNeighborhood(expandParamsOf(node, fetchKinds), currentUserPubky);
+      // A newer load() replaced the graph while we were in flight
+      if (nonce !== loadNonceRef.current) return;
+      // Recenter passes the clicked node as anchor: focus state has not
+      // committed yet in the same handler, so resolveAnchor would prune
+      // around the OLD focus and could evict the just-clicked cluster
+      mergeNeighborhood(neighborhood, node, anchorId);
+      setExpandedIds((prev) => new Set(prev).add(nodeId));
+    } catch (err) {
+      // Non-fatal: the current graph stays untouched
+      Logger.error(`${logTag}: failed to expand node`, err);
+      toast({ description: 'Could not expand this node.' });
+    } finally {
+      setIsExpanding(false);
+    }
+  };
 
-  const expand = useCallback((nodeId: string, anchorId?: string) => doExpand(nodeId, false, anchorId), [doExpand]);
-  const refreshNode = useCallback((nodeId: string) => doExpand(nodeId, true), [doExpand]);
+  const expand = (nodeId: string, anchorId?: string) => doExpand(nodeId, false, anchorId);
+  const refreshNode = (nodeId: string) => doExpand(nodeId, true);
 
   /**
    * Merge a tag's neighborhood in (chip click / search-to-add) and select its
@@ -259,90 +291,61 @@ export function useGraphCore({
    * chips. The explicit expandedIds entry doubles as the hub's visibility
    * pass in the default view.
    */
-  const addTag = useCallback(
-    async (label: string) => {
-      const nodeId = `tag:${label}`;
-      if (graph.nodes.some((n) => n.id === nodeId)) {
-        // Already on the raw graph (the feed synthesizes hubs from its posts),
-        // so it only needs revealing: the shared-hub filter keeps ids nobody
-        // asked for hidden
-        setExpandedIds((prev) => (prev.has(nodeId) ? prev : new Set(prev).add(nodeId)));
-        setSelectedId(nodeId);
-        return;
-      }
-      const nonce = loadNonce.current;
-      setIsExpanding(true);
-      try {
-        const neighborhood = await GraphController.fetchNeighborhood({ kind: 'tag', id: label }, currentUserPubky);
-        if (nonce !== loadNonce.current) return;
-        // Anchor the prune on the incoming hub: a disconnected added cluster
-        // is otherwise "infinitely far" from the focus and gets evicted
-        mergeNeighborhood(neighborhood, null, nodeId);
-        setExpandedIds((prev) => new Set(prev).add(nodeId));
-        setSelectedId(nodeId);
-      } catch (err) {
-        Logger.error(`${logTag}: failed to add tag`, err);
-        toast({ description: 'Could not expand this node.' });
-      } finally {
-        setIsExpanding(false);
-      }
-    },
-    [graph, loadNonce, currentUserPubky, mergeNeighborhood, logTag, t],
-  );
-
-  const tracePath = useCallback(
-    async (targetPubky: Pubky) => {
-      if (!currentUserPubky || isTracing) return;
-      const nonce = loadNonce.current;
-      setIsTracing(true);
-      try {
-        const path = await GraphController.fetchPath({ from: currentUserPubky, to: targetPubky }, currentUserPubky);
-        if (nonce !== loadNonce.current) return;
-        const me = graph.nodes.find((n) => n.id === `user:${currentUserPubky}`) ?? null;
-        mergeNeighborhood(path, me, me?.id);
-        setPathIds(path.nodes.map((n) => n.id));
-      } catch (err) {
-        Logger.error(`${logTag}: failed to trace path`, err);
-        toast({ description: 'No follow path found within 6 hops.' });
-      } finally {
-        setIsTracing(false);
-      }
-    },
-    [currentUserPubky, isTracing, graph, mergeNeighborhood, logTag, t],
-  );
-
-  // Full timestamp range of the raw graph (slider bounds)
-  const timeBounds = useMemo(() => {
-    let min = Infinity;
-    let max = -Infinity;
-    for (const edge of graph.edges) {
-      if (edge.indexed_at !== undefined) {
-        min = Math.min(min, edge.indexed_at);
-        max = Math.max(max, edge.indexed_at);
-      }
+  const addTag = async (label: string) => {
+    const nodeId = `tag:${label}`;
+    if (graph.nodes.some((n) => n.id === nodeId)) {
+      // Already on the raw graph (the feed synthesizes hubs from its posts),
+      // so it only needs revealing: the shared-hub filter keeps ids nobody
+      // asked for hidden
+      setExpandedIds((prev) => (prev.has(nodeId) ? prev : new Set(prev).add(nodeId)));
+      setSelectedId(nodeId);
+      return;
     }
-    for (const node of graph.nodes) {
-      if (node.kind === 'post' && node.indexed_at > 0) {
-        min = Math.min(min, node.indexed_at);
-        max = Math.max(max, node.indexed_at);
-      }
+    const nonce = loadNonceRef.current;
+    setIsExpanding(true);
+    try {
+      const neighborhood = await GraphController.fetchNeighborhood({ kind: 'tag', id: label }, currentUserPubky);
+      if (nonce !== loadNonceRef.current) return;
+      // Anchor the prune on the incoming hub: a disconnected added cluster
+      // is otherwise "infinitely far" from the focus and gets evicted
+      mergeNeighborhood(neighborhood, null, nodeId);
+      setExpandedIds((prev) => new Set(prev).add(nodeId));
+      setSelectedId(nodeId);
+    } catch (err) {
+      Logger.error(`${logTag}: failed to add tag`, err);
+      toast({ description: 'Could not expand this node.' });
+    } finally {
+      setIsExpanding(false);
     }
-    return min < max ? { min, max } : null;
-  }, [graph]);
+  };
 
-  // Sorted event timeline for constant-rate playback. Derived from the RAW
-  // graph on purpose: the visible edge set shrinks under the moving cap, and
-  // stamps derived from it would change identity on every playback tick,
-  // restarting the player at index zero forever.
-  const timelineStamps = useMemo(() => {
-    const stamps: number[] = [];
-    for (const edge of graph.edges) if (edge.indexed_at !== undefined) stamps.push(edge.indexed_at);
-    for (const node of graph.nodes) if (node.kind === 'post' && node.indexed_at > 0) stamps.push(node.indexed_at);
-    return stamps.sort((a, b) => a - b);
-  }, [graph]);
+  const tracePath = async (targetPubky: Pubky) => {
+    if (!currentUserPubky || isTracing) return;
+    const nonce = loadNonceRef.current;
+    setIsTracing(true);
+    try {
+      const path = await GraphController.fetchPath({ from: currentUserPubky, to: targetPubky }, currentUserPubky);
+      if (nonce !== loadNonceRef.current) return;
+      const me = graph.nodes.find((n) => n.id === `user:${currentUserPubky}`) ?? null;
+      mergeNeighborhood(path, me, me?.id);
+      setPathIds(path.nodes.map((n) => n.id));
+    } catch (err) {
+      Logger.error(`${logTag}: failed to trace path`, err);
+      toast({ description: 'No follow path found within 4 hops.' });
+    } finally {
+      setIsTracing(false);
+    }
+  };
 
-  // The visual-model pipeline; each stage is a pure, unit-tested function
+  const timeBounds = timeBoundsOf(graph);
+
+  const timelineStamps = timelineStampsOf(graph);
+
+  // The visual-model pipeline; each stage is a pure, unit-tested function.
+  // Kept in an explicit useMemo: the chip cache is mutated in place by
+  // deriveSatellites, so this must only run when an input really changed.
   const { nodes, edges, relationships, opacityTiers, sizeTiers, classCounts } = useMemo(() => {
+    const hiddenClasses = new Set<HideableClass>(hiddenClassList);
     const timed = applyTimeCap(graph.nodes, graph.edges, timeCap, focusId);
     const timedIds = timed.nodes.map((n) => n.id);
     const relationships = deriveRelationships(timedIds, timed.edges);
@@ -363,10 +366,8 @@ export function useGraphCore({
       // merged; every node would transiently classify 'other' and the canvas
       // would flash all-dim. Hold the previous tiers until the merge lands.
       const hasDirect = [...opacityTiers.values()].some((tier) => tier === 'direct');
-      if (!hasDirect && isExpanding && opacityTiersRef.current.size > 0) {
-        opacityTiers = opacityTiersRef.current;
-      } else {
-        opacityTiersRef.current = opacityTiers;
+      if (!hasDirect && isExpanding && heldOpacityTiers.size > 0) {
+        opacityTiers = heldOpacityTiers;
       }
     }
 
@@ -407,7 +408,9 @@ export function useGraphCore({
         // Staleness is relative to the capped moment, else to the newest
         // stamp in view (not the wall clock: on a stale snapshot every post
         // is "old" and declutter would silently empty the graph)
-        const result = applyDeclutter(nodes, edges, relationships, timeCap ?? timeBounds?.max ?? Date.now());
+        // With no timestamp anywhere there is nothing to age, so the fallback
+        // reference only has to be a number
+        const result = applyDeclutter(nodes, edges, relationships, timeCap ?? timeBounds?.max ?? 0);
         nodes = result.nodes;
         edges = result.edges;
       }
@@ -420,7 +423,7 @@ export function useGraphCore({
     // Per-user profile-tag chips, derived last so they follow exactly the
     // visible users; chip objects keep identity through the cache
     const visibleUsers = capped.nodes.filter((n): n is Extract<NexusGraphNode, { kind: 'user' }> => n.kind === 'user');
-    const satellites = deriveSatellites(visibleUsers, sizeTiers, tagsMap, satelliteCache.current, Date.now());
+    const satellites = deriveSatellites(visibleUsers, sizeTiers, tagsMap, satelliteCache, mutatedAt);
 
     const visualEdges = aggregateParallelEdges(collapseMutualFollows([...capped.edges, ...satellites.edges]));
     return {
@@ -442,25 +445,33 @@ export function useGraphCore({
     deriveRelationships,
     deriveSizeRelationships,
     exemptFocus,
-    hiddenClasses,
+    hiddenClassList,
     declutter,
-    timeBounds,
+    timeBounds?.max,
     capPostsByTier,
     tagHubsOn,
     expandedIds,
     tagsMap,
+    heldOpacityTiers,
+    satelliteCache,
+    mutatedAt,
   ]);
 
-  const selectedNode = useMemo(() => graph.nodes.find((node) => node.id === selectedId) ?? null, [graph, selectedId]);
+  // Commit the tiers the canvas just painted so the next recenter can hold them
+  useEffect(() => {
+    if (opacityTiers !== heldOpacityTiers) setHeldOpacityTiers(opacityTiers);
+  }, [opacityTiers, heldOpacityTiers]);
+
+  const selectedNode = graph.nodes.find((node) => node.id === selectedId) ?? null;
 
   return {
     graph,
     setGraph,
-    loadNonce,
+    loadNonceRef,
     currentUserPubky,
     selectedId,
     selectedNode,
-    select: useCallback((nodeId: string | null) => setSelectedId(nodeId), []),
+    select: (nodeId: string | null) => setSelectedId(nodeId),
     expandedIds,
     setExpandedIds,
     isExpanding,
@@ -474,7 +485,7 @@ export function useGraphCore({
     toggleDeclutter,
     setDeclutter,
     timeCap,
-    setTimeCap: useCallback((cap: number | null) => setTimeCapState(cap), []),
+    setTimeCap: (cap: number | null) => setTimeCapState(cap),
     timeBounds,
     timelineStamps,
     nodes,
@@ -489,6 +500,6 @@ export function useGraphCore({
     refreshNode,
     addTag,
     tracePath,
-    clearPath: useCallback(() => setPathIds(null), []),
+    clearPath: () => setPathIds(null),
   };
 }
