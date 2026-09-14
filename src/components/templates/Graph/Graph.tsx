@@ -98,9 +98,14 @@ export function Graph() {
     pathIds: () => graphPathIds,
   });
 
+  // Load on a new center only: `load` is recreated every render, and an
+  // effect keyed on it would refetch forever
+  const loadCenter = useEffectEvent((pubky: Pubky) => {
+    void load(pubky);
+  });
   useEffect(() => {
-    if (centerPubky) load(centerPubky);
-  }, [centerPubky, load]);
+    if (centerPubky) loadCenter(centerPubky);
+  }, [centerPubky]);
 
   // A search pick focuses, expands, and flies the camera onto the node. The
   // fly is delayed so the merge lands and the physics assigns coordinates
