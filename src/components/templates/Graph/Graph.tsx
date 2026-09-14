@@ -15,7 +15,12 @@ import { useGraphDebug } from '@/hooks/useGraphDebug/useGraphDebug';
 import { useIsMobile } from '@/hooks/useIsMobile/useIsMobile';
 import { useSocialGraph } from '@/hooks/useSocialGraph/useSocialGraph';
 import type { HideableClass, TrailEntry } from '@/hooks/useSocialGraph/useSocialGraph.types';
-import { edgeKey, type SocialGraphVisualEdge, socialProof } from '@/hooks/useSocialGraph/useSocialGraph.utils';
+import {
+  edgeKey,
+  type SocialGraphVisualEdge,
+  socialProof,
+  type VisualGraphNode,
+} from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { useTrackedPoint } from '@/hooks/useTrackedPoint/useTrackedPoint';
 import { cn } from '@/libs/utils/utils';
 import type { Pubky } from '@/models/models.types';
@@ -41,15 +46,15 @@ type HoverCard = { node: NexusGraphUserNode; x: number; y: number };
 function proofUsersOf(
   meId: string | null,
   selectedNode: NexusGraphNode | null,
-  edges: NexusGraphEdge[],
-  nodes: NexusGraphNode[],
+  edges: SocialGraphVisualEdge[],
+  nodes: VisualGraphNode[],
 ): { pubky: Pubky; name: string; image: string | null }[] {
   if (!meId || !selectedNode || selectedNode.kind !== 'user' || selectedNode.id === meId) {
     return [];
   }
   const ids = new Set(socialProof(meId, selectedNode.id, edges));
   return nodes
-    .filter((n): n is Extract<NexusGraphNode, { kind: 'user' }> => n.kind === 'user' && ids.has(n.id))
+    .filter((n): n is NexusGraphUserNode => n.kind === 'user' && ids.has(n.id))
     .map((n) => ({ pubky: n.pubky, name: n.name, image: n.image }));
 }
 
@@ -130,6 +135,13 @@ export function Graph() {
 
   // Advanced lens preferences (design-off defaults)
   const { edgeChipsOn, tagHubsOn, toggleEdgeChips, toggleTagHubs } = useGraphStore();
+  // The default load fetches no shared hubs, so turning them on refetches the
+  // focus with the wider kinds filter; turning them off only hides
+  const handleToggleTagHubs = () => {
+    const turningOn = !tagHubsOn;
+    toggleTagHubs();
+    if (turningOn && graph.focusId) void graph.refreshNode(graph.focusId);
+  };
 
   // Picks made in the global header search while on this page. The pick
   // handlers are read as an effect event so the effect only re-runs on a new
@@ -418,7 +430,7 @@ export function Graph() {
             edgeChipsOn={edgeChipsOn}
             onToggleEdgeChips={toggleEdgeChips}
             tagHubsOn={tagHubsOn}
-            onToggleTagHubs={toggleTagHubs}
+            onToggleTagHubs={handleToggleTagHubs}
             physicsPaused={physicsPaused}
             onTogglePhysics={() => {
               const next = !physicsPaused;
@@ -472,7 +484,7 @@ export function Graph() {
 
       {isMobile
         ? renderNodePanel(
-            'absolute inset-x-0 bottom-0 z-20 max-h-[65svh] w-full overflow-y-auto rounded-t-2xl rounded-b-none border-x-0 border-b-0 pb-[calc(5.5rem+env(safe-area-inset-bottom))]',
+            'absolute inset-x-0 bottom-0 z-30 max-h-[65svh] w-full overflow-y-auto rounded-t-2xl rounded-b-none border-x-0 border-b-0 pb-[calc(5.5rem+env(safe-area-inset-bottom))]',
           )
         : graph.selectedNode &&
           selectedPoint && (
@@ -524,7 +536,7 @@ export function Graph() {
         <div
           className={cn(
             GRAPH_SURFACE_CLASS,
-            'absolute bottom-24 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full px-3.5 py-1.5',
+            'absolute bottom-24 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full px-3.5 py-1.5',
             'animate-in zoom-in-95 fade-in',
           )}
           data-cy="graph-busy"

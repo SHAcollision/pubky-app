@@ -50,6 +50,16 @@ export class GraphController {
         UserStreamApplication.getOrFetchUsers({ userIds, viewerId: viewerId ?? undefined }),
         PostStreamApplication.getOrFetchPosts({ postIds, viewerId }),
       ]);
+      // A user cached through a details-only path has no relationship row, and
+      // the hover card would read that as "not following". The stream miss
+      // check above is details-based, so those users need a second pass.
+      if (viewerId && userIds.length > 0) {
+        const known = await UserApplication.getManyRelationships({ userIds });
+        const withoutRelationship = userIds.filter((id) => !known.has(id));
+        if (withoutRelationship.length > 0) {
+          await UserStreamApplication.fetchMissingUsersFromNexus({ cacheMissUserIds: withoutRelationship, viewerId });
+        }
+      }
       // Users persisted earlier through the details-only path have no user_tags
       // row (the stream miss-check above is details-based), so the canvas would
       // render them without profile-tag chips forever. Runs after the stream

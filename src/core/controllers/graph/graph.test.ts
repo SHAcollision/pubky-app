@@ -11,13 +11,13 @@ vi.mock('@/application/graph/graph', () => ({
   GraphApplication: { fetchNeighborhood: vi.fn(), fetchPath: vi.fn() },
 }));
 vi.mock('@/application/stream/users/users', () => ({
-  UserStreamApplication: { getOrFetchUsers: vi.fn() },
+  UserStreamApplication: { getOrFetchUsers: vi.fn(), fetchMissingUsersFromNexus: vi.fn() },
 }));
 vi.mock('@/application/stream/posts/post', () => ({
   PostStreamApplication: { getOrFetchPosts: vi.fn() },
 }));
 vi.mock('@/application/user/user', () => ({
-  UserApplication: { getManyTagsOrFetch: vi.fn() },
+  UserApplication: { getManyTagsOrFetch: vi.fn(), getManyRelationships: vi.fn() },
 }));
 
 const VIEWER = 'viewer00000000000000000000000000000000000000000000000' as Pubky;
@@ -54,6 +54,8 @@ describe('GraphController', () => {
     vi.mocked(UserStreamApplication.getOrFetchUsers).mockResolvedValue(undefined);
     vi.mocked(PostStreamApplication.getOrFetchPosts).mockResolvedValue(undefined);
     vi.mocked(UserApplication.getManyTagsOrFetch).mockResolvedValue(new Map());
+    vi.mocked(UserApplication.getManyRelationships).mockResolvedValue(new Map([[ALICE, {} as never]]));
+    vi.mocked(UserStreamApplication.fetchMissingUsersFromNexus).mockResolvedValue(undefined);
   });
 
   it('fetchNeighborhood is network only', async () => {
@@ -73,6 +75,16 @@ describe('GraphController', () => {
       viewerId: VIEWER,
     });
     expect(UserApplication.getManyTagsOrFetch).toHaveBeenCalledWith({ userIds: [ALICE, BOB] });
+    // Bob has details but no relationship row for this viewer: fetched in full
+    expect(UserStreamApplication.fetchMissingUsersFromNexus).toHaveBeenCalledWith({
+      cacheMissUserIds: [BOB],
+      viewerId: VIEWER,
+    });
+  });
+
+  it('skips the relationship pass without a viewer', async () => {
+    await GraphController.hydrateEntities(GRAPH);
+    expect(UserApplication.getManyRelationships).not.toHaveBeenCalled();
   });
 
   it('fetchPath is network only', async () => {

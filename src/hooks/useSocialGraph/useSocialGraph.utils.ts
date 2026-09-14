@@ -72,9 +72,9 @@ export function mergeGraph(prev: NexusGraph, incoming: NexusGraph): NexusGraph {
  * thick arrowless link instead of two overlapping arrows.
  */
 export function collapseMutualFollows(edges: SocialGraphVisualEdge[]): SocialGraphVisualEdge[] {
-  const followPairs = new Set<string>();
+  const followStamps = new Map<string, number | undefined>();
   for (const edge of edges) {
-    if (edge.type === 'FOLLOWS') followPairs.add(`${edge.source}>${edge.target}`);
+    if (edge.type === 'FOLLOWS') followStamps.set(`${edge.source}>${edge.target}`, edge.indexed_at);
   }
 
   const result: SocialGraphVisualEdge[] = [];
@@ -84,7 +84,8 @@ export function collapseMutualFollows(edges: SocialGraphVisualEdge[]): SocialGra
       result.push(edge);
       continue;
     }
-    if (!followPairs.has(`${edge.target}>${edge.source}`)) {
+    const reverseKey = `${edge.target}>${edge.source}`;
+    if (!followStamps.has(reverseKey)) {
       result.push(edge);
       continue;
     }
@@ -92,7 +93,13 @@ export function collapseMutualFollows(edges: SocialGraphVisualEdge[]): SocialGra
     const key = `${source}>${target}`;
     if (!emittedFriends.has(key)) {
       emittedFriends.add(key);
-      result.push({ source, target, type: 'FRIEND' });
+      // The friendship is as recent as the follow that completed it, so the
+      // recency ramp and the follow-age spotlight keep seeing the pair
+      const stamps = [edge.indexed_at, followStamps.get(reverseKey)].filter((t): t is number => t !== undefined);
+      const indexed_at = stamps.length > 0 ? Math.max(...stamps) : undefined;
+      result.push(
+        indexed_at === undefined ? { source, target, type: 'FRIEND' } : { source, target, type: 'FRIEND', indexed_at },
+      );
     }
   }
   return result;

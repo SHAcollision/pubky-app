@@ -14,6 +14,7 @@ import {
   type SocialGraphVisualEdge,
   type VisualGraphNode,
 } from '@/hooks/useSocialGraph/useSocialGraph.utils';
+import { isAppError } from '@/libs/error/error.utils';
 import { Logger } from '@/libs/logger/logger';
 import type { Pubky } from '@/models/models.types';
 import type { NexusGraph, NexusGraphEdge, NexusGraphNode } from '@/services/nexus/graph/graph.types';
@@ -147,7 +148,7 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
         );
       } catch (err) {
         // Non-fatal: the stream synthesis still renders
-        Logger.error('useStreamGraph: failed to seed viewer node', err);
+        if (!isAppError(err)) Logger.error('useStreamGraph: failed to seed viewer node', err);
       }
     })();
     // Runs once per signed-in user: `core` is a fresh object every render and
@@ -241,7 +242,7 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
           return mergeGraph(prev, synthesized);
         });
       } catch (err) {
-        Logger.error('useStreamGraph: failed to synthesize stream graph', err);
+        if (!isAppError(err)) Logger.error('useStreamGraph: failed to synthesize stream graph', err);
       }
     })();
     // `postIds` is a new array every render; `postKey` is its stable identity.

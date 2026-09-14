@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useGraphCore } from '@/hooks/useGraphCore/useGraphCore';
+import { isAppError } from '@/libs/error/error.utils';
 import { Logger } from '@/libs/logger/logger';
 import type { Pubky } from '@/models/models.types';
 import { toast } from '@/molecules/Toaster/toast';
@@ -106,6 +107,9 @@ export function useSocialGraph(): UseSocialGraphResult {
     select(null);
     setPathIds(null);
     setTimeCap(null);
+    // A full load replaces the canvas: a failure must not leave the previous
+    // center's graph under the new URL with the error hidden behind it
+    setGraph({ nodes: [], edges: [] });
     try {
       const neighborhood = await core.fetchNeighborhood({
         kind: 'user',
@@ -122,7 +126,7 @@ export function useSocialGraph(): UseSocialGraphResult {
       setTrail(entry ? [entry] : []);
     } catch (err) {
       if (nonce !== loadNonceRef.current) return;
-      Logger.error('useSocialGraph: failed to load graph', err);
+      if (!isAppError(err)) Logger.error('useSocialGraph: failed to load graph', err);
       setError(true);
     } finally {
       if (nonce === loadNonceRef.current) setIsLoading(false);
@@ -167,7 +171,7 @@ export function useSocialGraph(): UseSocialGraphResult {
       const entry = center && trailEntryOf(center);
       if (entry) setTrail((prev) => (prev.at(-1)?.id === nodeId ? prev : [...prev, entry]));
     } catch (err) {
-      Logger.error('useSocialGraph: failed to add user', err);
+      if (!isAppError(err)) Logger.error('useSocialGraph: failed to add user', err);
       toast({ variant: 'error', description: 'Could not expand this node.' });
     } finally {
       setIsExpanding(false);

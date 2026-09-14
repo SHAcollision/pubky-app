@@ -20,6 +20,7 @@ import {
   tierOf,
   type VisualGraphNode,
 } from '@/hooks/useSocialGraph/useSocialGraph.utils';
+import { isAppError } from '@/libs/error/error.utils';
 import { Logger } from '@/libs/logger/logger';
 import type { Pubky } from '@/models/models.types';
 import { toast } from '@/molecules/Toaster/toast';
@@ -104,6 +105,8 @@ export type GraphCore = {
   classCounts: Map<HideableClass, number>;
   /** kinds= filter for neighborhood fetches derived from the tag-hubs pref */
   fetchKinds: string | undefined;
+  /** Network fetch plus the cache backfill every graph load wants */
+  fetchNeighborhood: (params: TGraphNeighborhoodParams) => Promise<NexusGraph>;
   // Actions
   mergeNeighborhood: (incoming: NexusGraph, parent: NexusGraphNode | null, anchorId?: string) => void;
   expand: (nodeId: string, anchorId?: string) => Promise<void>;
@@ -299,7 +302,7 @@ export function useGraphCore({
       setExpandedIds((prev) => new Set(prev).add(nodeId));
     } catch (err) {
       // Non-fatal: the current graph stays untouched
-      Logger.error(`${logTag}: failed to expand node`, err);
+      if (!isAppError(err)) Logger.error(`${logTag}: failed to expand node`, err);
       toast({ variant: 'error', description: 'Could not expand this node.' });
     } finally {
       setIsExpanding(false);
@@ -336,7 +339,7 @@ export function useGraphCore({
       setExpandedIds((prev) => new Set(prev).add(nodeId));
       setSelectedId(nodeId);
     } catch (err) {
-      Logger.error(`${logTag}: failed to add tag`, err);
+      if (!isAppError(err)) Logger.error(`${logTag}: failed to add tag`, err);
       toast({ variant: 'error', description: 'Could not expand this node.' });
     } finally {
       setIsExpanding(false);
@@ -355,7 +358,7 @@ export function useGraphCore({
       mergeNeighborhood(path, me, me?.id);
       setPathIds(path.nodes.map((n) => n.id));
     } catch (err) {
-      Logger.error(`${logTag}: failed to trace path`, err);
+      if (!isAppError(err)) Logger.error(`${logTag}: failed to trace path`, err);
       toast({ variant: 'error', description: 'No follow path found within 4 hops.' });
     } finally {
       setIsTracing(false);

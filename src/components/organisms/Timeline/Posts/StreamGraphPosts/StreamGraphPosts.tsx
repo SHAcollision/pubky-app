@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Loader2, StickyNote, X } from 'lucide-react';
 import { Button } from '@/atoms/Button/Button';
 import { Container } from '@/atoms/Container/Container';
@@ -83,11 +83,11 @@ export function StreamGraphPosts({
   // QA/debug surface for the cypress interaction audit (debug builds only)
   const { focusId: graphFocusId, pathIds: graphPathIds } = graph;
   useGraphDebug(canvasRef, {
-    focusId: useCallback(() => graphFocusId, [graphFocusId]),
-    pathIds: useCallback(() => graphPathIds, [graphPathIds]),
+    focusId: () => graphFocusId,
+    pathIds: () => graphPathIds,
   });
 
-  const proofUsers = useMemo(() => {
+  const proofUsers = (() => {
     if (!meId || !graph.selectedNode || graph.selectedNode.kind !== 'user' || graph.selectedNode.id === meId) {
       return [];
     }
@@ -95,23 +95,20 @@ export function StreamGraphPosts({
     return graph.nodes
       .filter((n): n is Extract<NexusGraphNode, { kind: 'user' }> => n.kind === 'user' && ids.has(n.id))
       .map((n) => ({ pubky: n.pubky, name: n.name, image: n.image }));
-  }, [meId, graph.selectedNode, graph.edges, graph.nodes]);
+  })();
 
-  const spotlightClass = useCallback(
-    (cls: HideableClass | null) => {
-      if (!cls) {
-        setSpotlight(null);
-        return;
-      }
-      const members = new Set<string>();
-      for (const node of graph.nodes) {
-        const nodeClass = node.kind === 'user' ? (graph.relationships.get(node.id) ?? 'extended') : node.kind;
-        if (nodeClass === cls) members.add(node.id);
-      }
-      setSpotlight(members);
-    },
-    [graph.nodes, graph.relationships],
-  );
+  const spotlightClass = (cls: HideableClass | null) => {
+    if (!cls) {
+      setSpotlight(null);
+      return;
+    }
+    const members = new Set<string>();
+    for (const node of graph.nodes) {
+      const nodeClass = node.kind === 'user' ? (graph.relationships.get(node.id) ?? 'extended') : node.kind;
+      if (nodeClass === cls) members.add(node.id);
+    }
+    setSpotlight(members);
+  };
 
   // Re-fit the camera once each merged page settles, but only when the RAW
   // graph grew: filter toggles and time-machine scrubs also change the visible
@@ -139,61 +136,52 @@ export function StreamGraphPosts({
     },
     [],
   );
-  const handleNodeClick = useCallback(
-    (id: string) => {
-      if (id.startsWith('user:')) {
-        setHoverCard(null);
-        recenterAt.current = Date.now();
-        void recenter(id);
-        canvasRef.current?.centerOn(id);
-        return;
-      }
-      if (id.startsWith('ptag:')) {
-        const label = id.split(':').slice(2).join(':');
-        if (!label) return;
-        recenterAt.current = Date.now();
-        void addTag(label);
-        // Fly once the merge lands and the physics places the hub
-        if (flyTimer.current) clearTimeout(flyTimer.current);
-        flyTimer.current = setTimeout(() => canvasRef.current?.centerOn(`tag:${label}`), 900);
-        return;
-      }
-      graphSelect(id);
-    },
-    [recenter, addTag, graphSelect],
-  );
+  const handleNodeClick = (id: string) => {
+    if (id.startsWith('user:')) {
+      setHoverCard(null);
+      recenterAt.current = Date.now();
+      void recenter(id);
+      canvasRef.current?.centerOn(id);
+      return;
+    }
+    if (id.startsWith('ptag:')) {
+      const label = id.split(':').slice(2).join(':');
+      if (!label) return;
+      recenterAt.current = Date.now();
+      void addTag(label);
+      // Fly once the merge lands and the physics places the hub
+      if (flyTimer.current) clearTimeout(flyTimer.current);
+      flyTimer.current = setTimeout(() => canvasRef.current?.centerOn(`tag:${label}`), 900);
+      return;
+    }
+    graphSelect(id);
+  };
 
-  const handleRecenterSelf = useCallback(() => {
+  const handleRecenterSelf = () => {
     if (!meId) return;
     if (graph.nodes.some((n) => n.id === meId)) {
       recenterAt.current = Date.now();
       void recenter(meId);
       canvasRef.current?.centerOn(meId);
     }
-  }, [meId, graph.nodes, recenter]);
+  };
 
-  const handleUserHover = useCallback((node: NexusGraphNode | null, screen: { x: number; y: number } | null) => {
+  const handleUserHover = (node: NexusGraphNode | null, screen: { x: number; y: number } | null) => {
     if (hoverCloseTimer.current) clearTimeout(hoverCloseTimer.current);
     if (node && node.kind === 'user' && screen) {
       setHoverCard({ node, x: screen.x, y: screen.y });
     } else {
       hoverCloseTimer.current = setTimeout(() => setHoverCard(null), 250);
     }
-  }, []);
+  };
 
-  const handleTraceConnection = useCallback(
-    (pubky: string) => {
-      setHoverCard(null);
-      void graph.tracePath(pubky as Pubky);
-    },
-    [graph],
-  );
+  const handleTraceConnection = (pubky: string) => {
+    setHoverCard(null);
+    void graph.tracePath(pubky as Pubky);
+  };
 
   const hoverNodeId = hoverCard?.node.id ?? null;
-  const computeHoverPoint = useCallback(
-    () => (hoverNodeId ? (canvasRef.current?.screenPositionOf(hoverNodeId) ?? null) : null),
-    [hoverNodeId],
-  );
+  const computeHoverPoint = () => (hoverNodeId ? (canvasRef.current?.screenPositionOf(hoverNodeId) ?? null) : null);
   const hoverPoint = useTrackedPoint(hoverNodeId ? computeHoverPoint : null);
 
   const isEmpty = !loading && graph.nodes.length === 0;
