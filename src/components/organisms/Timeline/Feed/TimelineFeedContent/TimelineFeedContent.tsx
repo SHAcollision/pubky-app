@@ -20,6 +20,7 @@ import { PostMainLayoutProvider } from '@/organisms/PostMain/PostMainLayoutConte
 import { buildFeedKey } from '@/stores/feedOptimistic/feedOptimistic.types';
 import { TimelineGridPosts } from '../../Posts/GridPosts/GridPosts';
 import { TimelinePosts } from '../../Posts/Posts';
+import { StreamGraphPosts } from '../../Posts/StreamGraphPosts/StreamGraphPosts';
 import { NewPostsSection } from '../NewPostsSection/NewPostsSection';
 import type {
   HomeTimelineFeedProps,
@@ -153,6 +154,7 @@ function TimelineFeedContent({
   const previousMutedUserIdSetRef = useRef<Set<string> | null>(null);
 
   const isVisualActive = layoutResolution?.isVisualActive ?? false;
+  const isGraphActive = layoutResolution?.isGraphActive ?? false;
   const isGridActive = layoutResolution?.isGridActive ?? false;
   const isCollectionFeed = variant === TIMELINE_FEED_VARIANT.COLLECTION;
   const {
@@ -272,7 +274,8 @@ function TimelineFeedContent({
   // `children` is the composer/filter region on interactive feeds (hidden by the
   // immersive Visual mosaic on Home/Search/Custom) but the collection hero on
   // COLLECTION, which must stay visible in every layout.
-  const shouldRenderChildren = !isVisualActive || isGridActive || variant === TIMELINE_FEED_VARIANT.COLLECTION;
+  const shouldRenderChildren =
+    (!isVisualActive && !isGraphActive) || isGridActive || variant === TIMELINE_FEED_VARIANT.COLLECTION;
 
   return (
     <TimelineFeedContext.Provider value={contextValue}>
@@ -300,6 +303,14 @@ function TimelineFeedContent({
               showEndMessage={showEndMessage}
               emptyState={emptyState}
               trailingSlot={trailingSlot}
+            />
+          ) : isGraphActive ? (
+            <StreamGraphPosts
+              postIds={postIds}
+              loading={loading}
+              loadingMore={loadingMore}
+              hasMore={hasMore}
+              loadMore={loadMore}
             />
           ) : isVisualActive ? (
             <VisualTimelinePosts
