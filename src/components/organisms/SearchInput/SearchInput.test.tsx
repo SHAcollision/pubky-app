@@ -404,6 +404,7 @@ describe('SearchInput', () => {
         handleKeyDown: vi.fn(),
         handleFocus: vi.fn(),
         clearInputValue: vi.fn(),
+        setInputValue: vi.fn(),
         setFocus: vi.fn(),
       });
       vi.mocked(useSearchAutocomplete).mockReturnValue({
@@ -413,7 +414,7 @@ describe('SearchInput', () => {
       });
 
       render(<SearchInput />);
-      fireEvent.click(screen.getByTestId('autocomplete-user-user123'));
+      fireEvent.click(screen.getByTestId('search-user-suggestion-user123'));
 
       expect(mockPush).not.toHaveBeenCalled();
       expect(useGraphStore.getState().searchTarget).toEqual({ kind: 'user', pubky: 'user123' });

@@ -143,6 +143,13 @@ export function markBirths(prev: NexusGraph, incoming: NexusGraph, parent: Nexus
   }
 }
 
+/** Two tier maps with the same entries. */
+function sameTiers(a: Map<string, GraphTier>, b: Map<string, GraphTier>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [id, tier] of a) if (b.get(id) !== tier) return false;
+  return true;
+}
+
 /** Full timestamp range of the raw graph (slider bounds). */
 function timeBoundsOf(graph: NexusGraph): { min: number; max: number } | null {
   let min = Infinity;
@@ -369,6 +376,11 @@ export function useGraphCore({
       if (!hasDirect && isExpanding && heldOpacityTiers.size > 0) {
         opacityTiers = heldOpacityTiers;
       }
+    }
+    // Same content as the held map means the same map: the commit effect below
+    // keys on identity, and a fresh equal map would re-run this memo forever
+    if (opacityTiers !== heldOpacityTiers && sameTiers(opacityTiers, heldOpacityTiers)) {
+      opacityTiers = heldOpacityTiers;
     }
 
     // Legend counts reflect what COULD be shown (pre class-hiding)

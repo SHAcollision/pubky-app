@@ -103,10 +103,13 @@ describe('StreamGraphPosts', () => {
 
     render(<StreamGraphPosts {...props} />);
 
-    // The controls sit at z-10; without a higher layer the fullscreen pill
-    // covers the panel's own close button
-    expect(document.querySelector('[data-cy="graph-controls"]')).toHaveClass('z-10');
-    expect(document.querySelector('[data-cy="graph-panel"]')).toHaveClass('z-[15]');
+    // Same z-10 layer as the controls, rendered after them so it paints on top
+    // and the fullscreen pill never covers the panel's own close button
+    const controls = document.querySelector('[data-cy="graph-controls"]')!;
+    const panel = document.querySelector('[data-cy="graph-panel"]')!;
+    expect(controls).toHaveClass('z-10');
+    expect(panel).toHaveClass('z-10');
+    expect(controls.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('pins the searched tags so the results hang off what was searched', () => {

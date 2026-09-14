@@ -178,7 +178,7 @@ export function SocialGraphNodePanel({
                 isFollowing={isFollowing}
                 isLoading={isUserLoading(node.pubky)}
                 isStatusLoading={isFollowStatusLoading}
-                onClick={() => toggleFollow(node.pubky, isFollowing, node.name)}
+                onClick={() => toggleFollow(node.pubky, isFollowing)}
               />
             )}
             <Button variant="secondary" size="sm" className="flex-1" asChild>

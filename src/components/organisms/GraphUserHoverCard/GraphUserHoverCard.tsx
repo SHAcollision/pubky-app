@@ -66,7 +66,6 @@ export function GraphUserHoverCard({
 
   const { isLoading: isActionLoading, onFollowClick } = useUserInfoPopoverActions({
     userId: pubky,
-    userName,
     isCurrentUser: isSelf,
     isFollowing,
     isFollowingStatusLoading: local === undefined,

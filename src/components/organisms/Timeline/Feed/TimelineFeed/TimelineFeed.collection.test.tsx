@@ -30,6 +30,7 @@ const gridLayoutResolution = (): FeedLayoutResolution => ({
   effectiveLayout: LAYOUT.COLUMNS,
   isVisualRequested: false,
   isVisualActive: false,
+  isGraphActive: false,
   isGridActive: true,
   isPhoneViewport: false,
 });

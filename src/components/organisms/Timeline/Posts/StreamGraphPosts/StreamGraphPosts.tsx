@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, StickyNote, X } from 'lucide-react';
 import { Button } from '@/atoms/Button/Button';
+import { Container } from '@/atoms/Container/Container';
 import { Spinner } from '@/atoms/Spinner/Spinner';
 import { Typography } from '@/atoms/Typography/Typography';
 import { GRAPH_PILL_CLASS } from '@/config/theme';
 import { useFullscreenToggle } from '@/hooks/useFullscreenToggle/useFullscreenToggle';
 import { useGraphDebug } from '@/hooks/useGraphDebug/useGraphDebug';
-import { useSearchTags } from '@/hooks/useSearchStreamId/useSearchStreamId';
+import { useSearchCriteria } from '@/hooks/useSearchCriteria/useSearchCriteria';
 import type { HideableClass } from '@/hooks/useSocialGraph/useSocialGraph.types';
 import { socialProof } from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { useStreamGraph } from '@/hooks/useStreamGraph/useStreamGraph';
@@ -27,6 +28,8 @@ import { SocialGraphNodePanel } from '@/organisms/SocialGraphNodePanel/SocialGra
 import type { NexusGraphNode, NexusGraphUserNode } from '@/services/nexus/graph/graph.types';
 import { useAuthStore } from '@/stores/auth/auth.store';
 import { useGraphStore } from '@/stores/graph/graph.store';
+
+const EMPTY_TAGS: string[] = [];
 
 export interface StreamGraphPostsProps {
   postIds: string[];
@@ -60,7 +63,8 @@ export function StreamGraphPosts({
   const { currentUserPubky } = useAuthStore();
   // On /search the URL's tags are the reason these posts are here; pin their
   // hubs so the results visibly hang off what was searched (empty elsewhere)
-  const searchedTags = useSearchTags();
+  const criteria = useSearchCriteria();
+  const searchedTags = criteria.mode === 'tags' ? criteria.tags : EMPTY_TAGS;
   const graph = useStreamGraph(postIds, searchedTags);
   const canvasRef = useRef<SocialGraphHandle>(null);
   const { isFullscreen, toggleFullscreen } = useFullscreenToggle(() => canvasRef.current?.fit());
@@ -335,7 +339,11 @@ export function StreamGraphPosts({
         />
       )}
 
-      {error && <TimelineError message={error} className="absolute top-20 right-6 left-6 z-10" />}
+      {error && (
+        <Container className="absolute top-20 right-6 left-6 z-10">
+          <TimelineError message={error} />
+        </Container>
+      )}
 
       {hasMore && !isEmpty && (
         <Button
