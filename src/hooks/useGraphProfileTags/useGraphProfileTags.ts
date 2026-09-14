@@ -1,6 +1,5 @@
 'use client';
 
-import { useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { UserController } from '@/controllers/user/user';
 import { Logger } from '@/libs/logger/logger';
@@ -18,7 +17,7 @@ const EMPTY_TAGS: Map<Pubky, NexusTag[]> = new Map();
  * pop in without any per-node fetching.
  */
 export function useGraphProfileTags(pubkys: Pubky[]): Map<Pubky, NexusTag[]> {
-  const pubkyKey = useMemo(() => [...pubkys].sort().join(','), [pubkys]);
+  const pubkyKey = [...pubkys].sort().join(',');
   const tags = useLiveQuery(async () => {
     try {
       if (pubkys.length === 0) return EMPTY_TAGS;

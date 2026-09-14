@@ -136,12 +136,16 @@ export function Graph() {
   // Advanced lens preferences (design-off defaults)
   const { edgeChipsOn, tagHubsOn, toggleEdgeChips, toggleTagHubs } = useGraphStore();
   // The default load fetches no shared hubs, so turning them on refetches the
-  // focus with the wider kinds filter; turning them off only hides
-  const handleToggleTagHubs = () => {
-    const turningOn = !tagHubsOn;
-    toggleTagHubs();
-    if (turningOn && graph.focusId) void graph.refreshNode(graph.focusId);
-  };
+  // focus with the wider kinds filter; turning them off only hides. Done from
+  // an effect so the refetch sees the updated kinds, not the handler's closure
+  const refreshFocus = useEffectEvent(() => {
+    if (graph.focusId) void graph.refreshNode(graph.focusId);
+  });
+  const hubsWereOn = useRef(tagHubsOn);
+  useEffect(() => {
+    if (tagHubsOn && !hubsWereOn.current) refreshFocus();
+    hubsWereOn.current = tagHubsOn;
+  }, [tagHubsOn]);
 
   // Picks made in the global header search while on this page. The pick
   // handlers are read as an effect event so the effect only re-runs on a new
@@ -430,7 +434,7 @@ export function Graph() {
             edgeChipsOn={edgeChipsOn}
             onToggleEdgeChips={toggleEdgeChips}
             tagHubsOn={tagHubsOn}
-            onToggleTagHubs={handleToggleTagHubs}
+            onToggleTagHubs={toggleTagHubs}
             physicsPaused={physicsPaused}
             onTogglePhysics={() => {
               const next = !physicsPaused;

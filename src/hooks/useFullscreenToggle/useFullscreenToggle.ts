@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useBodyScrollLock } from '@/hooks/useBodyScrollLock/useBodyScrollLock';
 
 /**
@@ -23,7 +23,7 @@ export function useFullscreenToggle(onToggled?: () => void) {
 
   useBodyScrollLock(isFullscreen);
 
-  const toggleFullscreen = useCallback(() => setIsFullscreen((on) => !on), []);
+  const toggleFullscreen = () => setIsFullscreen((on) => !on);
 
   // Escape exits, unless a popover or dialog layer already consumed the key
   useEffect(() => {
