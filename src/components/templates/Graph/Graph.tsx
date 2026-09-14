@@ -142,10 +142,18 @@ export function Graph() {
     if (graph.focusId) void graph.refreshNode(graph.focusId);
   });
   const hubsWereOn = useRef(tagHubsOn);
+  // A refresh requested while an expansion is in flight would be dropped by
+  // the single-flight guard, so it waits for the expansion to finish
+  const hubRefreshPending = useRef(false);
+  const { isExpanding } = graph;
   useEffect(() => {
-    if (tagHubsOn && !hubsWereOn.current) refreshFocus();
+    if (tagHubsOn && !hubsWereOn.current) hubRefreshPending.current = true;
     hubsWereOn.current = tagHubsOn;
-  }, [tagHubsOn]);
+    if (hubRefreshPending.current && !isExpanding) {
+      hubRefreshPending.current = false;
+      refreshFocus();
+    }
+  }, [tagHubsOn, isExpanding]);
 
   // Picks made in the global header search while on this page. The pick
   // handlers are read as an effect event so the effect only re-runs on a new
