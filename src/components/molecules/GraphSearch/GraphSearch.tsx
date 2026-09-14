@@ -91,7 +91,7 @@ export function GraphSearch({ onPickUser, onPickTag, className }: GraphSearchPro
           role="listbox"
           className={cn(
             GRAPH_SURFACE_CLASS,
-            'absolute top-full right-0 left-0 z-20 mt-2 max-h-80 overflow-y-auto bg-black/70 p-1.5',
+            'absolute top-full right-0 left-0 z-30 mt-2 max-h-80 overflow-y-auto bg-black/70 p-1.5',
           )}
         >
           {users.map((user) => (

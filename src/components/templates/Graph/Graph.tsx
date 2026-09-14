@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { RotateCcw, Users, X } from 'lucide-react';
 import { APP_ROUTES } from '@/app/routes';
@@ -36,6 +36,22 @@ import { useGraphStore } from '@/stores/graph/graph.store';
 
 type TagEdgePopover = { labels: string[]; sourceId: string; targetId: string; x: number; y: number };
 type HoverCard = { node: NexusGraphUserNode; x: number; y: number };
+
+/** "Followed by ..." strip data, straight from edges already on the canvas. */
+function proofUsersOf(
+  meId: string | null,
+  selectedNode: NexusGraphNode | null,
+  edges: NexusGraphEdge[],
+  nodes: NexusGraphNode[],
+): { pubky: Pubky; name: string; image: string | null }[] {
+  if (!meId || !selectedNode || selectedNode.kind !== 'user' || selectedNode.id === meId) {
+    return [];
+  }
+  const ids = new Set(socialProof(meId, selectedNode.id, edges));
+  return nodes
+    .filter((n): n is Extract<NexusGraphNode, { kind: 'user' }> => n.kind === 'user' && ids.has(n.id))
+    .map((n) => ({ pubky: n.pubky, name: n.name, image: n.image }));
+}
 
 /**
  * Graph
@@ -73,8 +89,8 @@ export function Graph() {
   // QA/debug surface for the cypress interaction audit (debug builds only)
   const { focusId: graphFocusId, pathIds: graphPathIds } = graph;
   useGraphDebug(canvasRef, {
-    focusId: useCallback(() => graphFocusId, [graphFocusId]),
-    pathIds: useCallback(() => graphPathIds, [graphPathIds]),
+    focusId: () => graphFocusId,
+    pathIds: () => graphPathIds,
   });
 
   useEffect(() => {
@@ -85,10 +101,10 @@ export function Graph() {
   // fly is delayed so the merge lands and the physics assigns coordinates
   // (centerOn no-ops on nodes without a position yet).
   const flyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const flyToNode = useCallback((nodeId: string) => {
+  const flyToNode = (nodeId: string) => {
     if (flyTimer.current) clearTimeout(flyTimer.current);
     flyTimer.current = setTimeout(() => canvasRef.current?.centerOn(nodeId), 900);
-  }, []);
+  };
   useEffect(
     () => () => {
       if (flyTimer.current) clearTimeout(flyTimer.current);
@@ -97,147 +113,125 @@ export function Graph() {
   );
 
   const { addUser, addTag, expand } = graph;
-  const handlePickUser = useCallback(
-    async (pubky: Pubky) => {
-      const nodeId = `user:${pubky}`;
-      await addUser(pubky);
-      // Expands nodes that were already on the canvas; freshly added centers
-      // arrive with their neighborhood and no-op here
-      await expand(nodeId);
-      flyToNode(nodeId);
-    },
-    [addUser, expand, flyToNode],
-  );
-  const handlePickTag = useCallback(
-    async (label: string) => {
-      const nodeId = `tag:${label}`;
-      await addTag(label);
-      await expand(nodeId);
-      flyToNode(nodeId);
-    },
-    [addTag, expand, flyToNode],
-  );
+  const handlePickUser = async (pubky: Pubky) => {
+    const nodeId = `user:${pubky}`;
+    await addUser(pubky);
+    // Expands nodes that were already on the canvas; freshly added centers
+    // arrive with their neighborhood and no-op here
+    await expand(nodeId);
+    flyToNode(nodeId);
+  };
+  const handlePickTag = async (label: string) => {
+    const nodeId = `tag:${label}`;
+    await addTag(label);
+    await expand(nodeId);
+    flyToNode(nodeId);
+  };
 
   // Advanced lens preferences (design-off defaults)
   const { edgeChipsOn, tagHubsOn, toggleEdgeChips, toggleTagHubs } = useGraphStore();
 
-  // Picks made in the global header search while on this page
+  // Picks made in the global header search while on this page. The pick
+  // handlers are read as an effect event so the effect only re-runs on a new
+  // target, not on every render that recreates them
   const searchTarget = useGraphStore((state) => state.searchTarget);
+  const onSearchTarget = useEffectEvent((target: NonNullable<typeof searchTarget>) => {
+    if (target.kind === 'user') void handlePickUser(target.pubky as Pubky);
+    else void handlePickTag(target.label);
+  });
   useEffect(() => {
     if (!searchTarget) return;
-    if (searchTarget.kind === 'user') void handlePickUser(searchTarget.pubky as Pubky);
-    else void handlePickTag(searchTarget.label);
+    onSearchTarget(searchTarget);
     useGraphStore.getState().clearSearchTarget();
-  }, [searchTarget, handlePickUser, handlePickTag]);
+  }, [searchTarget]);
 
   const meId = currentUserPubky ? `user:${currentUserPubky}` : null;
 
   // "Followed by ..." strip data, straight from edges already on the canvas
-  const proofUsers = useMemo(() => {
-    if (!meId || !graph.selectedNode || graph.selectedNode.kind !== 'user' || graph.selectedNode.id === meId) {
-      return [];
-    }
-    const ids = new Set(socialProof(meId, graph.selectedNode.id, graph.edges));
-    return graph.nodes
-      .filter((n): n is Extract<NexusGraphNode, { kind: 'user' }> => n.kind === 'user' && ids.has(n.id))
-      .map((n) => ({ pubky: n.pubky, name: n.name, image: n.image }));
-  }, [meId, graph.selectedNode, graph.edges, graph.nodes]);
+  const proofUsers = proofUsersOf(meId, graph.selectedNode, graph.edges, graph.nodes);
 
-  const spotlightClass = useCallback(
-    (cls: HideableClass | null) => {
-      setEdgeSpotlight(null);
-      if (!cls) {
-        setSpotlight(null);
-        return;
-      }
-      const members = new Set<string>();
-      for (const node of graph.nodes) {
-        const nodeClass = node.kind === 'user' ? (graph.relationships.get(node.id) ?? 'extended') : node.kind;
-        if (nodeClass === cls) members.add(node.id);
-      }
-      setSpotlight(members);
-    },
-    [graph.nodes, graph.relationships],
-  );
+  const spotlightClass = (cls: HideableClass | null) => {
+    setEdgeSpotlight(null);
+    if (!cls) {
+      setSpotlight(null);
+      return;
+    }
+    const members = new Set<string>();
+    for (const node of graph.nodes) {
+      const nodeClass = node.kind === 'user' ? (graph.relationships.get(node.id) ?? 'extended') : node.kind;
+      if (nodeClass === cls) members.add(node.id);
+    }
+    setSpotlight(members);
+  };
 
   // Edge rows of the legend spotlight matching edges plus their endpoints
-  const spotlightEdgeKind = useCallback(
-    (kind: EdgeLegendKind | null) => {
-      if (!kind) {
-        setEdgeSpotlight(null);
-        setSpotlight(null);
-        return;
+  const spotlightEdgeKind = (kind: EdgeLegendKind | null) => {
+    if (!kind) {
+      setEdgeSpotlight(null);
+      setSpotlight(null);
+      return;
+    }
+    const follows = graph.edges.filter(
+      (edge) =>
+        (edge.type === 'FOLLOWS' || edge.type === 'FRIEND') &&
+        edge.source !== graph.focusId &&
+        edge.target !== graph.focusId,
+    );
+    const keys = new Set<string>();
+    const endpoints = new Set<string>();
+    if (kind === 'fresh') {
+      const stamped = follows.filter((edge) => edge.indexed_at !== undefined);
+      let min = Infinity;
+      let max = -Infinity;
+      for (const edge of stamped) {
+        min = Math.min(min, edge.indexed_at!);
+        max = Math.max(max, edge.indexed_at!);
       }
-      const follows = graph.edges.filter(
-        (edge) =>
-          (edge.type === 'FOLLOWS' || edge.type === 'FRIEND') &&
-          edge.source !== graph.focusId &&
-          edge.target !== graph.focusId,
-      );
-      const keys = new Set<string>();
-      const endpoints = new Set<string>();
-      if (kind === 'fresh') {
-        const stamped = follows.filter((edge) => edge.indexed_at !== undefined);
-        let min = Infinity;
-        let max = -Infinity;
+      if (min < max) {
         for (const edge of stamped) {
-          min = Math.min(min, edge.indexed_at!);
-          max = Math.max(max, edge.indexed_at!);
-        }
-        if (min < max) {
-          for (const edge of stamped) {
-            // Same normalization as the canvas ramp; spotlight the bright end
-            if ((edge.indexed_at! - min) / (max - min) >= 0.7) {
-              keys.add(edgeKey(edge));
-              endpoints.add(edge.source);
-              endpoints.add(edge.target);
-            }
-          }
-        }
-      } else if (graph.communities) {
-        for (const edge of follows) {
-          const a = graph.communities.get(edge.source);
-          const b = graph.communities.get(edge.target);
-          if (a === undefined || b === undefined) continue;
-          if ((kind === 'intra') === (a === b)) {
+          // Same normalization as the canvas ramp; spotlight the bright end
+          if ((edge.indexed_at! - min) / (max - min) >= 0.7) {
             keys.add(edgeKey(edge));
             endpoints.add(edge.source);
             endpoints.add(edge.target);
           }
         }
       }
-      setEdgeSpotlight(keys.size > 0 ? keys : null);
-      setSpotlight(endpoints.size > 0 ? endpoints : null);
-    },
-    [graph.edges, graph.focusId, graph.communities],
-  );
-
-  const hasTies = useMemo(
-    () =>
-      graph.edges.some(
-        (edge) =>
-          (edge.type === 'FOLLOWS' || edge.type === 'FRIEND') &&
-          edge.source !== graph.focusId &&
-          edge.target !== graph.focusId,
-      ),
-    [graph.edges, graph.focusId],
-  );
-
-  const spotlightProof = useCallback(
-    (hovering: boolean) => {
-      setEdgeSpotlight(null);
-      if (!hovering || !meId || !graph.selectedNode) {
-        setSpotlight(null);
-        return;
+    } else if (graph.communities) {
+      for (const edge of follows) {
+        const a = graph.communities.get(edge.source);
+        const b = graph.communities.get(edge.target);
+        if (a === undefined || b === undefined) continue;
+        if ((kind === 'intra') === (a === b)) {
+          keys.add(edgeKey(edge));
+          endpoints.add(edge.source);
+          endpoints.add(edge.target);
+        }
       }
-      const set = new Set<string>([meId, graph.selectedNode.id]);
-      for (const user of proofUsers) set.add(`user:${user.pubky}`);
-      setSpotlight(set);
-    },
-    [meId, graph.selectedNode, proofUsers],
+    }
+    setEdgeSpotlight(keys.size > 0 ? keys : null);
+    setSpotlight(endpoints.size > 0 ? endpoints : null);
+  };
+
+  const hasTies = graph.edges.some(
+    (edge) =>
+      (edge.type === 'FOLLOWS' || edge.type === 'FRIEND') &&
+      edge.source !== graph.focusId &&
+      edge.target !== graph.focusId,
   );
 
-  const handleUserHover = useCallback((node: NexusGraphNode | null, screen: { x: number; y: number } | null) => {
+  const spotlightProof = (hovering: boolean) => {
+    setEdgeSpotlight(null);
+    if (!hovering || !meId || !graph.selectedNode) {
+      setSpotlight(null);
+      return;
+    }
+    const set = new Set<string>([meId, graph.selectedNode.id]);
+    for (const user of proofUsers) set.add(`user:${user.pubky}`);
+    setSpotlight(set);
+  };
+
+  const handleUserHover = (node: NexusGraphNode | null, screen: { x: number; y: number } | null) => {
     if (hoverCloseTimer.current) clearTimeout(hoverCloseTimer.current);
     if (node && node.kind === 'user' && screen) {
       setHoverCard({ node, x: screen.x, y: screen.y });
@@ -245,36 +239,33 @@ export function Graph() {
       // Grace period so the pointer can travel from node to card
       hoverCloseTimer.current = setTimeout(() => setHoverCard(null), 250);
     }
-  }, []);
+  };
 
   // Design click semantics: a user click centers + focuses (and dismisses any
   // hover card); a chip click expands its tag into the graph; posts and hubs
   // keep the inspector panel. Touch has no hover card, so a second tap on the
   // focused user opens the bottom-sheet panel instead.
   const { recenter, select: graphSelect } = graph;
-  const handleNodeClick = useCallback(
-    (id: string) => {
-      if (id.startsWith('user:')) {
-        setHoverCard(null);
-        if (isMobile && graph.focusId === id) {
-          graphSelect(id);
-          return;
-        }
-        void recenter(id);
-        canvasRef.current?.centerOn(id);
+  const handleNodeClick = (id: string) => {
+    if (id.startsWith('user:')) {
+      setHoverCard(null);
+      if (isMobile && graph.focusId === id) {
+        graphSelect(id);
         return;
       }
-      if (id.startsWith('ptag:')) {
-        const label = id.split(':').slice(2).join(':');
-        if (label) void handlePickTag(label);
-        return;
-      }
-      graphSelect(id);
-    },
-    [recenter, graphSelect, handlePickTag, isMobile, graph.focusId],
-  );
+      void recenter(id);
+      canvasRef.current?.centerOn(id);
+      return;
+    }
+    if (id.startsWith('ptag:')) {
+      const label = id.split(':').slice(2).join(':');
+      if (label) void handlePickTag(label);
+      return;
+    }
+    graphSelect(id);
+  };
 
-  const handleRecenterSelf = useCallback(() => {
+  const handleRecenterSelf = () => {
     if (!currentUserPubky) return;
     const nodeId = `user:${currentUserPubky}`;
     if (graph.nodes.some((n) => n.id === nodeId)) {
@@ -283,57 +274,45 @@ export function Graph() {
     } else {
       void handlePickUser(currentUserPubky);
     }
-  }, [currentUserPubky, graph.nodes, recenter, handlePickUser]);
+  };
 
-  const handleTraceConnection = useCallback(
-    (pubky: string) => {
-      setHoverCard(null);
-      void graph.tracePath(pubky as Pubky);
-    },
-    [graph],
-  );
+  const handleTraceConnection = (pubky: string) => {
+    setHoverCard(null);
+    void graph.tracePath(pubky as Pubky);
+  };
 
-  const handleLinkClick = useCallback((edge: SocialGraphVisualEdge, screen: { x: number; y: number }) => {
+  const handleLinkClick = (edge: SocialGraphVisualEdge, screen: { x: number; y: number }) => {
     // Any tag edge is inspectable; single-label edges just show one pill
     const labels = edge.labels ?? (edge.type === 'TAGGED' && edge.label ? [edge.label] : null);
     if (labels && labels.length > 0) {
       setTagPopover({ labels, sourceId: edge.source, targetId: edge.target, x: screen.x, y: screen.y });
     }
-  }, []);
+  };
 
-  const handleHop = useCallback(
-    (entry: TrailEntry) => {
-      graph.focus(entry.id);
-      canvasRef.current?.centerOn(entry.id);
-    },
-    [graph],
-  );
+  const handleHop = (entry: TrailEntry) => {
+    graph.focus(entry.id);
+    canvasRef.current?.centerOn(entry.id);
+  };
 
-  // A search-added graph counts as content even without a signed-in center
-  const hasContent = graph.nodes.length > 1;
+  // Anything beyond the viewer's own seed node is content: a searched
+  // isolated user or tag is a valid one-node graph
+  const hasContent = graph.nodes.some((n) => n.id !== meId);
   const isEmpty = !graph.isLoading && !graph.error && !hasContent;
 
   // Tracked anchor points: overlays follow their canvas entity per frame
   const hoverNodeId = hoverCard?.node.id ?? null;
-  const computeHoverPoint = useCallback(
-    () => (hoverNodeId ? (canvasRef.current?.screenPositionOf(hoverNodeId) ?? null) : null),
-    [hoverNodeId],
-  );
+  const computeHoverPoint = () => (hoverNodeId ? (canvasRef.current?.screenPositionOf(hoverNodeId) ?? null) : null);
   const hoverPoint = useTrackedPoint(hoverNodeId ? computeHoverPoint : null);
 
   const tagSourceId = tagPopover?.sourceId ?? null;
   const tagTargetId = tagPopover?.targetId ?? null;
-  const computeTagPoint = useCallback(
-    () => (tagSourceId && tagTargetId ? (canvasRef.current?.screenMidpointOf(tagSourceId, tagTargetId) ?? null) : null),
-    [tagSourceId, tagTargetId],
-  );
+  const computeTagPoint = () =>
+    tagSourceId && tagTargetId ? (canvasRef.current?.screenMidpointOf(tagSourceId, tagTargetId) ?? null) : null;
   const tagPoint = useTrackedPoint(tagSourceId ? computeTagPoint : null);
 
   const selectedNodeId = graph.selectedNode?.id ?? null;
-  const computeSelectedPoint = useCallback(
-    () => (selectedNodeId ? (canvasRef.current?.screenPositionOf(selectedNodeId) ?? null) : null),
-    [selectedNodeId],
-  );
+  const computeSelectedPoint = () =>
+    selectedNodeId ? (canvasRef.current?.screenPositionOf(selectedNodeId) ?? null) : null;
   const selectedPoint = useTrackedPoint(selectedNodeId && !isMobile ? computeSelectedPoint : null);
 
   const renderNodePanel = (className: string) =>

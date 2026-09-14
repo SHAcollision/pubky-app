@@ -6,7 +6,7 @@ import { useGraphStore } from '@/stores/graph/graph.store';
 import { useSocialGraph } from './useSocialGraph';
 
 vi.mock('@/controllers/graph/graph', () => ({
-  GraphController: { fetchNeighborhood: vi.fn(), fetchPath: vi.fn() },
+  GraphController: { fetchNeighborhood: vi.fn(), fetchPath: vi.fn(), hydrateEntities: vi.fn() },
 }));
 
 vi.mock('@/molecules/Toaster/toast', () => ({
@@ -71,7 +71,7 @@ describe('useSocialGraph', () => {
   it('loads a neighborhood, starts the trail, and derives the visual model', async () => {
     const { result } = await loadedHook();
 
-    expect(mockGetNeighborhood).toHaveBeenCalledWith({ kind: 'user', id: ME, depth: 1, kinds: 'user,post' }, ME);
+    expect(mockGetNeighborhood).toHaveBeenCalledWith({ kind: 'user', id: ME, depth: 1, kinds: 'user,post' });
     expect(result.current.focusId).toBe(`user:${ME}`);
     expect(result.current.trail.map((t) => t.id)).toEqual([`user:${ME}`]);
     expect(result.current.edges.filter((e) => e.type === 'FRIEND')).toHaveLength(1);
@@ -96,10 +96,7 @@ describe('useSocialGraph', () => {
       await result.current.expand('user:friend');
     });
 
-    expect(mockGetNeighborhood).toHaveBeenLastCalledWith(
-      { kind: 'user', id: 'friend', depth: 1, kinds: 'user,post' },
-      ME,
-    );
+    expect(mockGetNeighborhood).toHaveBeenLastCalledWith({ kind: 'user', id: 'friend', depth: 1, kinds: 'user,post' });
     expect(result.current.nodes).toHaveLength(4);
     expect(result.current.expandedIds.has('user:friend')).toBe(true);
 
@@ -203,7 +200,8 @@ describe('useSocialGraph', () => {
       await result.current.tracePath('far');
     });
 
-    expect(mockGetPath).toHaveBeenCalledWith({ from: ME, to: 'far' }, ME);
+    expect(mockGetPath).toHaveBeenCalledWith({ from: ME, to: 'far' });
+    expect(GraphController.hydrateEntities).toHaveBeenCalled();
     expect(result.current.pathIds).toEqual([`user:${ME}`, 'user:mid', 'user:far']);
     expect(result.current.nodes.map((n) => n.id)).toContain('user:far');
 
@@ -230,10 +228,7 @@ describe('useSocialGraph', () => {
 
     expect(result.current.focusId).toBe('user:friend');
     expect(result.current.trail.at(-1)?.id).toBe('user:friend');
-    expect(mockGetNeighborhood).toHaveBeenLastCalledWith(
-      { kind: 'user', id: 'friend', depth: 1, kinds: 'user,post' },
-      ME,
-    );
+    expect(mockGetNeighborhood).toHaveBeenLastCalledWith({ kind: 'user', id: 'friend', depth: 1, kinds: 'user,post' });
 
     // Already expanded: a second recenter only refocuses, no refetch
     await act(async () => {

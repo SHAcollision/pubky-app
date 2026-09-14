@@ -246,17 +246,34 @@ export function useGraphCore({
   const userPubkys = graph.nodes.flatMap((n) => (n.kind === 'user' ? [n.pubky] : []));
   const tagsMap = useGraphProfileTags(userPubkys);
 
+  // The graph as of the last commit, plus any merge applied since: two
+  // producers resolving in the same tick (viewer seed and stream gather, or
+  // two expansions) must each build on the other's result, not on the render
+  // they started from
+  const latestGraphRef = useRef(graph);
+  useEffect(() => {
+    latestGraphRef.current = graph;
+  }, [graph]);
+
+  /** Network fetch plus the cache backfill every graph load wants. */
+  const fetchNeighborhood = async (params: TGraphNeighborhoodParams) => {
+    const neighborhood = await GraphController.fetchNeighborhood(params);
+    void GraphController.hydrateEntities(neighborhood, currentUserPubky);
+    return neighborhood;
+  };
+
   const mergeNeighborhood = (incoming: NexusGraph, parent: NexusGraphNode | null, anchorId?: string) => {
-    // Computed against the closed-over graph (all callers depend on it), not
-    // inside the updater: React defers queued updaters, which would race the
-    // pruned-count toast below
-    markBirths(graph, incoming, parent);
-    const merged = mergeGraph(graph, incoming);
+    // Computed here, not inside the updater: React defers queued updaters,
+    // which would race the pruned-count toast below
+    const base = latestGraphRef.current;
+    markBirths(base, incoming, parent);
+    const merged = mergeGraph(base, incoming);
     const result = pruneToBudget(
       merged,
-      { focusId: anchorId ?? resolveAnchor(graph, parent), selectedId, expandedIds },
+      { focusId: anchorId ?? resolveAnchor(base, parent), selectedId, expandedIds },
       MAX_CLIENT_NODES,
     );
+    latestGraphRef.current = result.graph;
     setGraph(result.graph);
     if (result.evictedIds.size > 0) {
       // A node whose neighborhood was evicted must become expandable again
@@ -272,7 +289,7 @@ export function useGraphCore({
     const nonce = loadNonceRef.current;
     setIsExpanding(true);
     try {
-      const neighborhood = await GraphController.fetchNeighborhood(expandParamsOf(node, fetchKinds), currentUserPubky);
+      const neighborhood = await fetchNeighborhood(expandParamsOf(node, fetchKinds));
       // A newer load() replaced the graph while we were in flight
       if (nonce !== loadNonceRef.current) return;
       // Recenter passes the clicked node as anchor: focus state has not
@@ -283,7 +300,7 @@ export function useGraphCore({
     } catch (err) {
       // Non-fatal: the current graph stays untouched
       Logger.error(`${logTag}: failed to expand node`, err);
-      toast({ description: 'Could not expand this node.' });
+      toast({ variant: 'error', description: 'Could not expand this node.' });
     } finally {
       setIsExpanding(false);
     }
@@ -311,7 +328,7 @@ export function useGraphCore({
     const nonce = loadNonceRef.current;
     setIsExpanding(true);
     try {
-      const neighborhood = await GraphController.fetchNeighborhood({ kind: 'tag', id: label }, currentUserPubky);
+      const neighborhood = await fetchNeighborhood({ kind: 'tag', id: label });
       if (nonce !== loadNonceRef.current) return;
       // Anchor the prune on the incoming hub: a disconnected added cluster
       // is otherwise "infinitely far" from the focus and gets evicted
@@ -320,7 +337,7 @@ export function useGraphCore({
       setSelectedId(nodeId);
     } catch (err) {
       Logger.error(`${logTag}: failed to add tag`, err);
-      toast({ description: 'Could not expand this node.' });
+      toast({ variant: 'error', description: 'Could not expand this node.' });
     } finally {
       setIsExpanding(false);
     }
@@ -331,14 +348,15 @@ export function useGraphCore({
     const nonce = loadNonceRef.current;
     setIsTracing(true);
     try {
-      const path = await GraphController.fetchPath({ from: currentUserPubky, to: targetPubky }, currentUserPubky);
+      const path = await GraphController.fetchPath({ from: currentUserPubky, to: targetPubky });
+      void GraphController.hydrateEntities(path, currentUserPubky);
       if (nonce !== loadNonceRef.current) return;
       const me = graph.nodes.find((n) => n.id === `user:${currentUserPubky}`) ?? null;
       mergeNeighborhood(path, me, me?.id);
       setPathIds(path.nodes.map((n) => n.id));
     } catch (err) {
       Logger.error(`${logTag}: failed to trace path`, err);
-      toast({ description: 'No follow path found within 4 hops.' });
+      toast({ variant: 'error', description: 'No follow path found within 4 hops.' });
     } finally {
       setIsTracing(false);
     }
@@ -507,6 +525,7 @@ export function useGraphCore({
     sizeTiers,
     classCounts,
     fetchKinds,
+    fetchNeighborhood,
     mergeNeighborhood,
     expand,
     refreshNode,

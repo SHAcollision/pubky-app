@@ -1,7 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { GraphController } from '@/controllers/graph/graph';
+import { useEffect, useRef, useState } from 'react';
 import { useGraphCore } from '@/hooks/useGraphCore/useGraphCore';
 import { Logger } from '@/libs/logger/logger';
 import type { Pubky } from '@/models/models.types';
@@ -15,6 +14,38 @@ import { detectCommunities, dominantLabel, type GraphRelationship, relationshipM
 function trailEntryOf(node: NexusGraphNode): TrailEntry | null {
   if (node.kind !== 'user') return null;
   return { id: node.id, pubky: node.pubky, name: node.name, image: node.image };
+}
+
+/**
+ * Louvain communities of the raw graph plus a caption per community. Detected
+ * on the raw graph: community structure should not churn while the time
+ * machine scrubs or a legend class is toggled; the canvas only halos visible
+ * members anyway.
+ */
+function communitiesOf(
+  communitiesOn: boolean,
+  graph: NexusGraph,
+): { communities: Map<string, number> | null; communityLabels: Map<number, string> } {
+  if (!communitiesOn) return { communities: null, communityLabels: new Map<number, string>() };
+  // Detected on the raw graph: community structure should not churn (nor
+  // Louvain re-run 20 times a second) while the time machine scrubs or a
+  // legend class is toggled; the canvas only halos visible members anyway
+  const communities = detectCommunities(
+    graph.nodes.map((n) => n.id),
+    graph.edges,
+  );
+  const members = new Map<number, Set<string>>();
+  for (const [id, community] of communities) {
+    if (!members.has(community)) members.set(community, new Set());
+    members.get(community)!.add(id);
+  }
+  const communityLabels = new Map<number, string>();
+  for (const [community, ids] of members) {
+    if (ids.size < 3) continue; // captioning pairs is noise
+    const label = dominantLabel(ids, graph.edges);
+    if (label) communityLabels.set(community, label);
+  }
+  return { communities, communityLabels };
 }
 
 /**
@@ -36,22 +67,13 @@ export function useSocialGraph(): UseSocialGraphResult {
   const meNodeId = viewerPubky ? `user:${viewerPubky}` : null;
 
   // Opacity tiers derive from the FOLLOWS topology around the focus
-  const deriveRelationships = useCallback(
-    (nodeIds: string[], edges: NexusGraphEdge[]): Map<string, GraphRelationship> =>
-      relationshipMap(focusId ?? '', nodeIds, edges),
-    [focusId],
-  );
+  const deriveRelationships = (nodeIds: string[], edges: NexusGraphEdge[]): Map<string, GraphRelationship> =>
+    relationshipMap(focusId ?? '', nodeIds, edges);
   // Sizes/chip counts stay anchored on the signed-in user; signed-out deep
   // links fall back to the focus so the center still reads 64px
-  const deriveSizeRelationships = useCallback(
-    (nodeIds: string[], edges: NexusGraphEdge[]): Map<string, GraphRelationship> =>
-      relationshipMap(meNodeId ?? focusId ?? '', nodeIds, edges),
-    [meNodeId, focusId],
-  );
-  const resolveAnchor = useCallback(
-    (_graph: NexusGraph, parent: NexusGraphNode | null) => focusId ?? parent?.id ?? '',
-    [focusId],
-  );
+  const deriveSizeRelationships = (nodeIds: string[], edges: NexusGraphEdge[]): Map<string, GraphRelationship> =>
+    relationshipMap(meNodeId ?? focusId ?? '', nodeIds, edges);
+  const resolveAnchor = (_graph: NexusGraph, parent: NexusGraphNode | null) => focusId ?? parent?.id ?? '';
 
   const core = useGraphCore({
     logTag: 'useSocialGraph',
@@ -65,7 +87,6 @@ export function useSocialGraph(): UseSocialGraphResult {
     graph,
     setGraph,
     loadNonceRef,
-    currentUserPubky,
     expandedIds,
     expand,
     setExpandedIds,
@@ -78,85 +99,80 @@ export function useSocialGraph(): UseSocialGraphResult {
     edges,
   } = core;
 
-  const load = useCallback(
-    async (pubky: Pubky) => {
-      const nonce = ++loadNonceRef.current;
-      setIsLoading(true);
-      setError(false);
-      select(null);
-      setPathIds(null);
-      setTimeCap(null);
-      try {
-        const neighborhood = await GraphController.fetchNeighborhood(
-          { kind: 'user', id: pubky, depth: 1, ...(core.fetchKinds ? { kinds: core.fetchKinds } : {}) },
-          currentUserPubky,
-        );
-        if (nonce !== loadNonceRef.current) return;
-        setGraph(neighborhood);
-        setFocusId(`user:${pubky}`);
-        setExpandedIds(new Set([`user:${pubky}`]));
-        const center = neighborhood.nodes.find((n) => n.id === `user:${pubky}`);
-        const entry = center && trailEntryOf(center);
-        setTrail(entry ? [entry] : []);
-      } catch (err) {
-        if (nonce !== loadNonceRef.current) return;
-        Logger.error('useSocialGraph: failed to load graph', err);
-        setError(true);
-      } finally {
-        if (nonce === loadNonceRef.current) setIsLoading(false);
-      }
-    },
-    [loadNonceRef, currentUserPubky, core.fetchKinds, select, setPathIds, setTimeCap, setGraph, setExpandedIds],
-  );
+  const load = async (pubky: Pubky) => {
+    const nonce = ++loadNonceRef.current;
+    setIsLoading(true);
+    setError(false);
+    select(null);
+    setPathIds(null);
+    setTimeCap(null);
+    try {
+      const neighborhood = await core.fetchNeighborhood({
+        kind: 'user',
+        id: pubky,
+        depth: 1,
+        ...(core.fetchKinds ? { kinds: core.fetchKinds } : {}),
+      });
+      if (nonce !== loadNonceRef.current) return;
+      setGraph(neighborhood);
+      setFocusId(`user:${pubky}`);
+      setExpandedIds(new Set([`user:${pubky}`]));
+      const center = neighborhood.nodes.find((n) => n.id === `user:${pubky}`);
+      const entry = center && trailEntryOf(center);
+      setTrail(entry ? [entry] : []);
+    } catch (err) {
+      if (nonce !== loadNonceRef.current) return;
+      Logger.error('useSocialGraph: failed to load graph', err);
+      setError(true);
+    } finally {
+      if (nonce === loadNonceRef.current) setIsLoading(false);
+    }
+  };
 
-  const focus = useCallback(
-    (nodeId: string) => {
-      const node = graph.nodes.find((n) => n.id === nodeId && n.kind === 'user');
-      if (!node) return;
-      setFocusId(nodeId);
-      const entry = trailEntryOf(node);
-      if (entry) {
-        setTrail((prev) => (prev.at(-1)?.id === nodeId ? prev : [...prev, entry]));
-      }
-    },
-    [graph],
-  );
+  const focus = (nodeId: string) => {
+    const node = graph.nodes.find((n) => n.id === nodeId && n.kind === 'user');
+    if (!node) return;
+    setFocusId(nodeId);
+    const entry = trailEntryOf(node);
+    if (entry) {
+      setTrail((prev) => (prev.at(-1)?.id === nodeId ? prev : [...prev, entry]));
+    }
+  };
 
   /** Search-to-add: merge a user's neighborhood in and make them the focus. */
-  const addUser = useCallback(
-    async (pubky: Pubky) => {
-      const nodeId = `user:${pubky}`;
-      const existing = graph.nodes.find((n) => n.id === nodeId);
-      if (existing) {
-        focus(nodeId);
-        return;
-      }
-      const nonce = loadNonceRef.current;
-      setIsExpanding(true);
-      try {
-        const neighborhood = await GraphController.fetchNeighborhood(
-          { kind: 'user', id: pubky, depth: 1, ...(core.fetchKinds ? { kinds: core.fetchKinds } : {}) },
-          currentUserPubky,
-        );
-        if (nonce !== loadNonceRef.current) return;
-        // Anchor the prune on the incoming center: a disconnected search-added
-        // cluster is otherwise "infinitely far" from the old focus and gets
-        // evicted the moment it lands
-        mergeNeighborhood(neighborhood, null, nodeId);
-        setExpandedIds((prev) => new Set(prev).add(nodeId));
-        setFocusId(nodeId);
-        const center = neighborhood.nodes.find((n) => n.id === nodeId);
-        const entry = center && trailEntryOf(center);
-        if (entry) setTrail((prev) => (prev.at(-1)?.id === nodeId ? prev : [...prev, entry]));
-      } catch (err) {
-        Logger.error('useSocialGraph: failed to add user', err);
-        toast({ description: 'Could not expand this node.' });
-      } finally {
-        setIsExpanding(false);
-      }
-    },
-    [graph, focus, loadNonceRef, currentUserPubky, core.fetchKinds, mergeNeighborhood, setExpandedIds, setIsExpanding],
-  );
+  const addUser = async (pubky: Pubky) => {
+    const nodeId = `user:${pubky}`;
+    const existing = graph.nodes.find((n) => n.id === nodeId);
+    if (existing) {
+      focus(nodeId);
+      return;
+    }
+    const nonce = loadNonceRef.current;
+    setIsExpanding(true);
+    try {
+      const neighborhood = await core.fetchNeighborhood({
+        kind: 'user',
+        id: pubky,
+        depth: 1,
+        ...(core.fetchKinds ? { kinds: core.fetchKinds } : {}),
+      });
+      if (nonce !== loadNonceRef.current) return;
+      // Anchor the prune on the incoming center: a disconnected search-added
+      // cluster is otherwise "infinitely far" from the old focus and gets
+      // evicted the moment it lands
+      mergeNeighborhood(neighborhood, null, nodeId);
+      setExpandedIds((prev) => new Set(prev).add(nodeId));
+      setFocusId(nodeId);
+      const center = neighborhood.nodes.find((n) => n.id === nodeId);
+      const entry = center && trailEntryOf(center);
+      if (entry) setTrail((prev) => (prev.at(-1)?.id === nodeId ? prev : [...prev, entry]));
+    } catch (err) {
+      Logger.error('useSocialGraph: failed to add user', err);
+      toast({ variant: 'error', description: 'Could not expand this node.' });
+    } finally {
+      setIsExpanding(false);
+    }
+  };
 
   /**
    * Design behavior: single click on a user centers + focuses them. Re-anchors
@@ -164,47 +180,23 @@ export function useSocialGraph(): UseSocialGraphResult {
    * pruning around the clicked node rather than the previous focus. The
    * camera flight is the template's job (it owns the canvas handle).
    */
-  const recenter = useCallback(
-    async (nodeId: string) => {
-      const node = graph.nodes.find((n) => n.id === nodeId && n.kind === 'user');
-      if (!node) return;
-      focus(nodeId);
-      if (!expandedIds.has(nodeId)) await expand(nodeId, nodeId);
-    },
-    [graph, focus, expandedIds, expand],
-  );
+  const recenter = async (nodeId: string) => {
+    const node = graph.nodes.find((n) => n.id === nodeId && n.kind === 'user');
+    if (!node) return;
+    focus(nodeId);
+    if (!expandedIds.has(nodeId)) await expand(nodeId, nodeId);
+  };
 
   /** Search-to-add for tags: shared core behavior (chip click / search). */
   const addTag = core.addTag;
 
   const { communitiesOn, toggleCommunities } = useGraphStore();
-  const { communities, communityLabels } = useMemo(() => {
-    if (!communitiesOn) return { communities: null, communityLabels: new Map<number, string>() };
-    // Detected on the raw graph: community structure should not churn (nor
-    // Louvain re-run 20 times a second) while the time machine scrubs or a
-    // legend class is toggled; the canvas only halos visible members anyway
-    const communities = detectCommunities(
-      graph.nodes.map((n) => n.id),
-      graph.edges,
-    );
-    const members = new Map<number, Set<string>>();
-    for (const [id, community] of communities) {
-      if (!members.has(community)) members.set(community, new Set());
-      members.get(community)!.add(id);
-    }
-    const communityLabels = new Map<number, string>();
-    for (const [community, ids] of members) {
-      if (ids.size < 3) continue; // captioning pairs is noise
-      const label = dominantLabel(ids, graph.edges);
-      if (label) communityLabels.set(community, label);
-    }
-    return { communities, communityLabels };
-  }, [communitiesOn, graph]);
+  const { communities, communityLabels } = communitiesOf(communitiesOn, graph);
 
   // Dense graphs start decluttered; the user can always toggle back.
   // Satellite HAS_TAG spokes do not count: they scale with visible users by
   // design and would silently halve the effective threshold.
-  const realEdgeCount = useMemo(() => edges.reduce((n, e) => n + (e.type === 'HAS_TAG' ? 0 : 1), 0), [edges]);
+  const realEdgeCount = edges.reduce((n, e) => n + (e.type === 'HAS_TAG' ? 0 : 1), 0);
   useEffect(() => {
     if (autoDecluttered.current || realEdgeCount <= AUTO_DECLUTTER_EDGES) return;
     autoDecluttered.current = true;

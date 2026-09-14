@@ -11,38 +11,34 @@ export class GraphController {
   private constructor() {} // Prevent instantiation
 
   /**
-   * Fetch the neighborhood graph around a center entity (user, post, or tag)
+   * Fetch the neighborhood graph around a center entity (user, post, or tag). Network only.
    * @param params - Center kind + id, plus optional depth/limit/kinds filters
-   * @param viewerId - Optional viewer for relationship data on the ingested entities
    * @returns Nodes and edges around the center, ids kind-prefixed
    */
-  static async fetchNeighborhood(params: TGraphNeighborhoodParams, viewerId?: Pubky | null): Promise<NexusGraph> {
-    const graph = await GraphApplication.fetchNeighborhood(params);
-    void this.ingestGraphEntities(graph, viewerId);
-    return graph;
+  static async fetchNeighborhood(params: TGraphNeighborhoodParams): Promise<NexusGraph> {
+    return await GraphApplication.fetchNeighborhood(params);
   }
 
   /**
-   * Fetch the shortest FOLLOWS path between two users (max 4 hops)
+   * Fetch the shortest FOLLOWS path between two users (max 4 hops). Network only.
    * @param params - from/to pubkies
-   * @param viewerId - Optional viewer for relationship data on the ingested entities
    * @returns Path graph; nodes are ordered along the path
    */
-  static async fetchPath(params: TGraphPathParams, viewerId?: Pubky | null): Promise<NexusGraph> {
-    const graph = await GraphApplication.fetchPath(params);
-    void this.ingestGraphEntities(graph, viewerId);
-    return graph;
+  static async fetchPath(params: TGraphPathParams): Promise<NexusGraph> {
+    return await GraphApplication.fetchPath(params);
   }
 
   /**
-   * Backfill Dexie with the full entities behind a graph payload, fire and
-   * forget. The payload rows are partial (no bio, links or counts) so they are
-   * never upserted directly; the ids go through the stream applications, which
-   * persist details, counts, tags, relationships and TTL in one shot. Ghost
-   * post nodes get hydrated the same way. Lives here because the controller is
-   * the layer that may orchestrate several applications.
+   * Backfill Dexie with the full entities behind a graph payload. The payload
+   * rows are partial (no bio, links or counts) so they are never upserted
+   * directly; the ids go through the stream applications, which persist
+   * details, counts, tags, relationships and TTL in one shot. Ghost post
+   * nodes get hydrated the same way. Never throws: a failed backfill only
+   * means the selection surfaces read stale or missing local rows.
+   * @param graph - A payload returned by fetchNeighborhood or fetchPath
+   * @param viewerId - Optional viewer for relationship data on the hydrated entities
    */
-  private static async ingestGraphEntities(graph: NexusGraph, viewerId?: Pubky | null): Promise<void> {
+  static async hydrateEntities(graph: NexusGraph, viewerId?: Pubky | null): Promise<void> {
     try {
       const userIds: Pubky[] = [];
       const postIds: string[] = [];
@@ -61,7 +57,7 @@ export class GraphController {
       // tags-table miss check internally.
       await UserApplication.getManyTagsOrFetch({ userIds });
     } catch (error) {
-      Logger.warn('GraphController: failed to ingest graph entities', { error });
+      Logger.warn('GraphController: failed to hydrate graph entities', { error });
     }
   }
 }

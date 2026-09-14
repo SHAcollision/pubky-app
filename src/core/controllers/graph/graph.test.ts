@@ -43,7 +43,7 @@ const GRAPH: NexusGraph = {
   edges: [],
 };
 
-/** Resolves once queued microtasks (the fire-and-forget hydration) have run. */
+/** Resolves once queued microtasks have run. */
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('GraphController', () => {
@@ -56,10 +56,16 @@ describe('GraphController', () => {
     vi.mocked(UserApplication.getManyTagsOrFetch).mockResolvedValue(new Map());
   });
 
-  it('fetchNeighborhood returns the graph and hydrates its users, posts and profile tags', async () => {
-    const result = await GraphController.fetchNeighborhood({ kind: 'user', id: ALICE }, VIEWER);
+  it('fetchNeighborhood is network only', async () => {
+    const result = await GraphController.fetchNeighborhood({ kind: 'user', id: ALICE });
     expect(result).toEqual(GRAPH);
+    expect(GraphApplication.fetchNeighborhood).toHaveBeenCalledWith({ kind: 'user', id: ALICE });
     await flush();
+    expect(UserStreamApplication.getOrFetchUsers).not.toHaveBeenCalled();
+  });
+
+  it('hydrateEntities backfills the users, posts and profile tags behind a payload', async () => {
+    await GraphController.hydrateEntities(GRAPH, VIEWER);
 
     expect(UserStreamApplication.getOrFetchUsers).toHaveBeenCalledWith({ userIds: [ALICE, BOB], viewerId: VIEWER });
     expect(PostStreamApplication.getOrFetchPosts).toHaveBeenCalledWith({
@@ -69,16 +75,13 @@ describe('GraphController', () => {
     expect(UserApplication.getManyTagsOrFetch).toHaveBeenCalledWith({ userIds: [ALICE, BOB] });
   });
 
-  it('fetchPath hydrates too', async () => {
+  it('fetchPath is network only', async () => {
     await GraphController.fetchPath({ from: VIEWER, to: ALICE });
-    await flush();
-    expect(UserStreamApplication.getOrFetchUsers).toHaveBeenCalled();
+    expect(GraphApplication.fetchPath).toHaveBeenCalledWith({ from: VIEWER, to: ALICE });
   });
 
-  it('never rejects the caller when hydration fails', async () => {
+  it('hydrateEntities never throws', async () => {
     vi.mocked(UserStreamApplication.getOrFetchUsers).mockRejectedValue(new Error('dexie down'));
-    const result = await GraphController.fetchNeighborhood({ kind: 'user', id: ALICE });
-    expect(result).toEqual(GRAPH);
-    await flush();
+    await expect(GraphController.hydrateEntities(GRAPH)).resolves.toBeUndefined();
   });
 });

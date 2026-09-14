@@ -7,7 +7,7 @@ import { useGraphStore } from '@/stores/graph/graph.store';
 import { useStreamGraph } from './useStreamGraph';
 
 vi.mock('@/controllers/graph/graph', () => ({
-  GraphController: { fetchNeighborhood: vi.fn(), fetchPath: vi.fn() },
+  GraphController: { fetchNeighborhood: vi.fn(), fetchPath: vi.fn(), hydrateEntities: vi.fn() },
 }));
 vi.mock('@/controllers/post/post', () => ({
   PostController: { getDetailsByIds: vi.fn(), getRelationships: vi.fn(), getTags: vi.fn() },

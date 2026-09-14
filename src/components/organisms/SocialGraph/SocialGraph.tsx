@@ -132,7 +132,9 @@ export const SocialGraph = forwardRef<SocialGraphHandle, SocialGraphProps>(funct
   // popover (the inspector panel is the touch affordance). Deliberately not
   // useIsTouchDevice: that reports true for mouse-driven touchscreen laptops
   // (maxTouchPoints > 0) and would disable the hover card there.
-  const coarsePointer = useMemo(() => window.matchMedia?.('(pointer: coarse)')?.matches ?? false, []);
+  const [coarsePointer] = useState(
+    () => typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)')?.matches ?? false),
+  );
   // Flips once the dynamically imported engine mounts and the ref is live;
   // effects keyed on it would otherwise fire against an empty ref
   const [engineReady, setEngineReady] = useState(false);

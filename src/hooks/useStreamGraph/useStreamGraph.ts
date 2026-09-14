@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { PostController } from '@/controllers/post/post';
 import { UserController } from '@/controllers/user/user';
@@ -85,38 +85,26 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
   // (a stream graph has no FOLLOWS edges to derive from); once a recenter
   // targets another user, derive from the FOLLOWS topology their expansion
   // merged in
-  const deriveRelationships = useCallback(
-    (nodeIds: string[], edges: NexusGraphEdge[]) => {
-      if (focusOverride && focusOverride !== meNodeId) return relationshipMap(focusOverride, nodeIds, edges);
-      return viewerRelationships(currentUserPubky, nodeIds, authorRels);
-    },
-    [focusOverride, meNodeId, currentUserPubky, authorRels],
-  );
+  const deriveRelationships = (nodeIds: string[], edges: NexusGraphEdge[]) => {
+    if (focusOverride && focusOverride !== meNodeId) return relationshipMap(focusOverride, nodeIds, edges);
+    return viewerRelationships(currentUserPubky, nodeIds, authorRels);
+  };
 
   // Sizes/chip counts always anchor on the signed-in viewer (flags-based)
-  const deriveSizeRelationships = useCallback(
-    (nodeIds: string[]) => viewerRelationships(currentUserPubky, nodeIds, authorRels),
-    [currentUserPubky, authorRels],
-  );
+  const deriveSizeRelationships = (nodeIds: string[]) => viewerRelationships(currentUserPubky, nodeIds, authorRels);
 
-  const resolveAnchor = useCallback(
-    (graph: NexusGraph, parent: NexusGraphNode | null) => {
-      const meId = currentUserPubky ? `user:${currentUserPubky}` : null;
-      return parent?.id ?? (meId && graph.nodes.some((n) => n.id === meId) ? meId : (graph.nodes[0]?.id ?? ''));
-    },
-    [currentUserPubky],
-  );
+  const resolveAnchor = (graph: NexusGraph, parent: NexusGraphNode | null) => {
+    const meId = currentUserPubky ? `user:${currentUserPubky}` : null;
+    return parent?.id ?? (meId && graph.nodes.some((n) => n.id === meId) ? meId : (graph.nodes[0]?.id ?? ''));
+  };
 
   // The focused node (recentered user, else the viewer when present) anchors
   // the time-cap exemption and default pruning
-  const deriveFocusId = useCallback(
-    (graph: NexusGraph) => {
-      if (focusOverride && graph.nodes.some((n) => n.id === focusOverride)) return focusOverride;
-      const meId = currentUserPubky ? `user:${currentUserPubky}` : null;
-      return meId && graph.nodes.some((n) => n.id === meId) ? meId : null;
-    },
-    [focusOverride, currentUserPubky],
-  );
+  const deriveFocusId = (graph: NexusGraph) => {
+    if (focusOverride && graph.nodes.some((n) => n.id === focusOverride)) return focusOverride;
+    const meId = currentUserPubky ? `user:${currentUserPubky}` : null;
+    return meId && graph.nodes.some((n) => n.id === meId) ? meId : null;
+  };
 
   const core = useGraphCore({
     logTag: 'useStreamGraph',
@@ -184,15 +172,12 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
   }, [pinnedKey, graph]);
 
   /** Design click behavior: center + focus a user, expanding them once. */
-  const recenter = useCallback(
-    async (nodeId: string) => {
-      const node = graph.nodes.find((n) => n.id === nodeId && n.kind === 'user');
-      if (!node) return;
-      setFocusOverride(nodeId === meNodeId ? null : nodeId);
-      if (!expandedIds.has(nodeId)) await expand(nodeId, nodeId);
-    },
-    [graph, meNodeId, expandedIds, expand],
-  );
+  const recenter = async (nodeId: string) => {
+    const node = graph.nodes.find((n) => n.id === nodeId && n.kind === 'user');
+    if (!node) return;
+    setFocusOverride(nodeId === meNodeId ? null : nodeId);
+    if (!expandedIds.has(nodeId)) await expand(nodeId, nodeId);
+  };
 
   // Gather the stream's already-cached data and merge the synthesized graph
   // in. Pagination appends to the previous ids and merges; anything else (a
@@ -266,7 +251,7 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
 
   // Viewer relationship flags for every user in the graph, read from Dexie
   // reactively: follow/unfollow and TTL refreshes repaint colors live
-  const userPubkys = useMemo(() => graph.nodes.flatMap((n) => (n.kind === 'user' ? [n.pubky] : [])), [graph]);
+  const userPubkys = graph.nodes.flatMap((n) => (n.kind === 'user' ? [n.pubky] : []));
   const pubkyKey = userPubkys.join(',');
   const liveRels = useLiveQuery(async () => {
     try {
