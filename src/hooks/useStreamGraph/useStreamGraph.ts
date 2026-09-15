@@ -116,7 +116,7 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
     // The feed's posts ARE the content; never thin them to the design cap
     capPostsByTier: false,
   });
-  const { graph, setGraph, expandedIds, expand } = core;
+  const { graph, setGraph, expandedIds, expand, loadNonceRef } = core;
 
   // Design: "Always include and start with signed in user in this visual
   // graph, even if user has no recent posts." Only the viewer's NODE is
@@ -196,6 +196,9 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
       // node that is gone falls back to the viewer
       core.setExpandedIds(new Set());
       setFocusOverride(null);
+      // An expansion still in flight belongs to the old feed; bumping the
+      // nonce makes it discard its result instead of merging it back in
+      loadNonceRef.current += 1;
     }
     if (postIds.length === 0) return;
     (async () => {

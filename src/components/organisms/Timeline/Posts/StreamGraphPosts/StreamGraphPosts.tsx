@@ -182,7 +182,7 @@ export function StreamGraphPosts({
 
   const hoverNodeId = hoverCard?.node.id ?? null;
   const computeHoverPoint = () => (hoverNodeId ? (canvasRef.current?.screenPositionOf(hoverNodeId) ?? null) : null);
-  const hoverPoint = useTrackedPoint(hoverNodeId ? computeHoverPoint : null);
+  const hoverPoint = useTrackedPoint(hoverNodeId ? computeHoverPoint : null, hoverNodeId);
 
   const isEmpty = !loading && graph.nodes.length === 0;
 

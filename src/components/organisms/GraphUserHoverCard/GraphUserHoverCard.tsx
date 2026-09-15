@@ -1,6 +1,5 @@
 'use client';
 
-import { useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { GitBranch } from 'lucide-react';
 import { Button } from '@/atoms/Button/Button';
@@ -72,24 +71,20 @@ export function GraphUserHoverCard({
   });
 
   // Facepiles strictly from the canvas: neighbors already on screen
-  const { followersAvatars, followingAvatars } = useMemo(() => {
-    const toItems = (ids: string[]): AvatarGroupItem[] =>
-      ids.flatMap((id) => {
-        const neighbor = nodes.find((n) => n.id === id);
-        if (!neighbor || neighbor.kind !== 'user') return [];
-        return [
-          {
-            id: neighbor.pubky,
-            name: neighbor.name || neighbor.pubky,
-            avatarUrl: neighbor.image ? FileController.getAvatarUrl(neighbor.pubky) : undefined,
-          },
-        ];
-      });
-    return {
-      followersAvatars: toItems(facepileCandidates(node.id, edges, meId, 'followers', MAX_AVATARS)),
-      followingAvatars: toItems(facepileCandidates(node.id, edges, meId, 'following', MAX_AVATARS)),
-    };
-  }, [node.id, nodes, edges, meId]);
+  const toItems = (ids: string[]): AvatarGroupItem[] =>
+    ids.flatMap((id) => {
+      const neighbor = nodes.find((n) => n.id === id);
+      if (!neighbor || neighbor.kind !== 'user') return [];
+      return [
+        {
+          id: neighbor.pubky,
+          name: neighbor.name || neighbor.pubky,
+          avatarUrl: neighbor.image ? FileController.getAvatarUrl(neighbor.pubky) : undefined,
+        },
+      ];
+    });
+  const followersAvatars = toItems(facepileCandidates(node.id, edges, meId, 'followers', MAX_AVATARS));
+  const followingAvatars = toItems(facepileCandidates(node.id, edges, meId, 'following', MAX_AVATARS));
 
   if (!open) return null;
 

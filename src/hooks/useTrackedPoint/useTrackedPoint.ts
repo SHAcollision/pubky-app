@@ -7,10 +7,13 @@ import { useEffect, useEffectEvent, useState } from 'react';
  * overlays spawn next to their node and track pan, zoom, and drags. Holds the
  * last point through momentary null samples. The sampler is read as an effect
  * event, so a caller may pass a fresh closure every render without restarting
- * the frame loop; only switching between tracking and not tracking restarts it.
+ * the frame loop; the loop restarts (and the held point clears) only when
+ * tracking starts, stops, or `target` changes, so a new target never inherits
+ * the previous one's position.
  */
 export function useTrackedPoint(
   compute: (() => { x: number; y: number } | null) | null,
+  target: string | null = null,
 ): { x: number; y: number } | null {
   const [point, setPoint] = useState<{ x: number; y: number } | null>(null);
   const active = compute !== null;
@@ -33,6 +36,6 @@ export function useTrackedPoint(
       cancelAnimationFrame(raf);
       setPoint(null);
     };
-  }, [active]);
+  }, [active, target]);
   return point;
 }

@@ -331,18 +331,21 @@ export function Graph() {
   // Tracked anchor points: overlays follow their canvas entity per frame
   const hoverNodeId = hoverCard?.node.id ?? null;
   const computeHoverPoint = () => (hoverNodeId ? (canvasRef.current?.screenPositionOf(hoverNodeId) ?? null) : null);
-  const hoverPoint = useTrackedPoint(hoverNodeId ? computeHoverPoint : null);
+  const hoverPoint = useTrackedPoint(hoverNodeId ? computeHoverPoint : null, hoverNodeId);
 
   const tagSourceId = tagPopover?.sourceId ?? null;
   const tagTargetId = tagPopover?.targetId ?? null;
   const computeTagPoint = () =>
     tagSourceId && tagTargetId ? (canvasRef.current?.screenMidpointOf(tagSourceId, tagTargetId) ?? null) : null;
-  const tagPoint = useTrackedPoint(tagSourceId ? computeTagPoint : null);
+  const tagPoint = useTrackedPoint(
+    tagSourceId ? computeTagPoint : null,
+    tagSourceId && `${tagSourceId}|${tagTargetId}`,
+  );
 
   const selectedNodeId = graph.selectedNode?.id ?? null;
   const computeSelectedPoint = () =>
     selectedNodeId ? (canvasRef.current?.screenPositionOf(selectedNodeId) ?? null) : null;
-  const selectedPoint = useTrackedPoint(selectedNodeId && !isMobile ? computeSelectedPoint : null);
+  const selectedPoint = useTrackedPoint(selectedNodeId && !isMobile ? computeSelectedPoint : null, selectedNodeId);
 
   const renderNodePanel = (className: string) =>
     graph.selectedNode ? (
