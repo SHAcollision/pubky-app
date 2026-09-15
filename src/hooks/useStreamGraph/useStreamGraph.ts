@@ -192,6 +192,10 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
     const isAppend = prev.length > 0 && postIds.length >= prev.length && prev.every((id, i) => postIds[i] === id);
     if (!isAppend) {
       setGraph((g) => ({ nodes: g.nodes.filter((n) => n.id === meNodeId), edges: [] }));
+      // The dropped neighborhoods must be expandable again, and a focus on a
+      // node that is gone falls back to the viewer
+      core.setExpandedIds(new Set());
+      setFocusOverride(null);
     }
     if (postIds.length === 0) return;
     (async () => {
@@ -246,7 +250,7 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
       }
     })();
     // `postIds` is a new array every render; `postKey` is its stable identity.
-    // `meNodeId` and `setGraph` are only read inside the effect body
+    // `meNodeId`, `setGraph` and the two resets are only read inside the body
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [postKey]);
 
