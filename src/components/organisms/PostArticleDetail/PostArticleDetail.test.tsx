@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePostArticle } from '@/hooks/usePostArticle/usePostArticle';
 import {
+  POST_COVER_DESKTOP_FALLBACK_VARIANT,
   POST_COVER_DESKTOP_MEDIA,
   POST_COVER_DESKTOP_VARIANT,
   POST_COVER_MOBILE_VARIANT,
@@ -19,6 +20,13 @@ import { PostArticleDetail } from './PostArticleDetail';
  * than by test id so the assertions describe the markup the page actually ships.
  */
 const getCoverImage = () => document.querySelector<HTMLImageElement>('picture img');
+
+/** jsdom never selects a candidate, so the failing one is set the way a browser reports it. */
+const failCoverLoad = (failedSrc: string) => {
+  const img = getCoverImage()!;
+  Object.defineProperty(img, 'currentSrc', { configurable: true, value: failedSrc });
+  fireEvent.error(img);
+};
 
 vi.mock('@/hooks/usePostArticle/usePostArticle', () => ({
   usePostArticle: vi.fn(),
@@ -404,6 +412,97 @@ describe('PostArticleDetail', () => {
     expect(getCoverImage()).toHaveAttribute('src', 'https://example.com/cover-feed.webp');
   });
 
+  it('falls back to the main desktop source when the large source fails to load', () => {
+    mockUsePostArticle.mockReturnValue({
+      title: 'Test Title',
+      body: 'Test body',
+      coverImage: {
+        src: 'https://example.com/cover-feed.webp',
+        desktopSrc: 'https://example.com/cover-large.webp',
+        desktopFallbackSrc: 'https://example.com/cover-main.png',
+        alt: 'Cover image',
+      },
+      hasCover: true,
+      isCoverLoading: false,
+    });
+
+    render(<PostArticleDetail {...defaultProps} />);
+
+    const source = () => document.querySelector('picture source');
+    expect(source()).toHaveAttribute('srcset', 'https://example.com/cover-large.webp');
+
+    // Nexus only serves `large` once the deploy behind pubky/pubky-nexus#1085 lands; until then
+    // the desktop request 400s and the browser fires `error` on the `<img>` carrying the selected
+    // source. The desktop candidate must then drop to `main` (the pre-#2666 behaviour) instead of
+    // showing a broken image, while the phone candidate stays `feed` so a phone never downloads
+    // the multi-megabyte upload.
+    failCoverLoad('https://example.com/cover-large.webp');
+
+    expect(source()).toHaveAttribute('srcset', 'https://example.com/cover-main.png');
+    expect(getCoverImage()).toHaveAttribute('src', 'https://example.com/cover-feed.webp');
+  });
+
+  it('keeps the large desktop source when the phone feed candidate is the one that fails', () => {
+    mockUsePostArticle.mockReturnValue({
+      title: 'Test Title',
+      body: 'Test body',
+      coverImage: {
+        src: 'https://example.com/cover-feed.webp',
+        desktopSrc: 'https://example.com/cover-large.webp',
+        desktopFallbackSrc: 'https://example.com/cover-main.png',
+        alt: 'Cover image',
+      },
+      hasCover: true,
+      isCoverLoading: false,
+    });
+
+    render(<PostArticleDetail {...defaultProps} />);
+
+    // A phone never requested `large`, so a failed `feed` must not send a later wide viewport to
+    // the original upload.
+    failCoverLoad('https://example.com/cover-feed.webp');
+
+    expect(document.querySelector('picture source')).toHaveAttribute('srcset', 'https://example.com/cover-large.webp');
+  });
+
+  it('starts a later cover on the large source again after an earlier one fell back', () => {
+    mockUsePostArticle.mockReturnValue({
+      title: 'Test Title',
+      body: 'Test body',
+      coverImage: {
+        src: 'https://example.com/a-feed.webp',
+        desktopSrc: 'https://example.com/a-large.webp',
+        desktopFallbackSrc: 'https://example.com/a-main.png',
+        alt: 'A',
+      },
+      hasCover: true,
+      isCoverLoading: false,
+    });
+
+    const { rerender } = render(<PostArticleDetail {...defaultProps} />);
+    fireEvent.error(getCoverImage()!);
+    expect(document.querySelector('picture source')).toHaveAttribute('srcset', 'https://example.com/a-main.png');
+
+    // A cover change on the same mount must not inherit the previous cover's downgrade: the
+    // remembered failure is keyed to the URL that failed, not to the component.
+    mockUsePostArticle.mockReturnValue({
+      title: 'Test Title',
+      body: 'Test body',
+      coverImage: {
+        src: 'https://example.com/b-feed.webp',
+        desktopSrc: 'https://example.com/b-large.webp',
+        desktopFallbackSrc: 'https://example.com/b-main.png',
+        alt: 'B',
+      },
+      hasCover: true,
+      isCoverLoading: false,
+    });
+
+    rerender(<PostArticleDetail {...defaultProps} />);
+
+    expect(document.querySelector('picture source')).toHaveAttribute('srcset', 'https://example.com/b-large.webp');
+  });
+
   it('renders a kept local cover from its large variant on desktop, a fresh upload from its object URL', () => {
     mockUsePostArticle.mockReturnValue({
       title: 'Test Title',
@@ -549,6 +648,148 @@ describe('PostArticleDetail', () => {
     expect(getCoverImage()).toHaveAttribute('alt', 'local-priority.png');
   });
 
+  it('keeps the desktop slot on the preloaded variant for a kept CDN cover', () => {
+    mockUsePostArticle.mockReturnValue({
+      title: 'Test Title',
+      body: 'Test body',
+      coverImage: {
+        src: 'https://cdn.example/cover-feed.webp',
+        desktopSrc: 'https://cdn.example/cover-large.webp',
+        desktopFallbackSrc: 'https://cdn.example/cover-main.png',
+        alt: 'Remote cover',
+      },
+      hasCover: true,
+      isCoverLoading: false,
+    });
+    mockUseLocalFilesStore.mockImplementation((selector) =>
+      selector(
+        createMockLocalFilesStore({
+          'user123:post456': [
+            {
+              type: 'image/png',
+              name: 'kept-cover.png',
+              urls: { main: 'https://cdn.example/cover-main.png', feed: 'https://cdn.example/cover-feed.webp' },
+            },
+          ],
+        }),
+      ),
+    );
+
+    render(<PostArticleDetail {...defaultProps} />);
+
+    // A kept attachment resolves to the same file as the remote cover, so the local entry and the
+    // remote variant are interchangeable. The server preloaded `large`; rendering the local `main`
+    // here would pull the original upload the preload exists to replace.
+    expect(document.querySelector('picture source')).toHaveAttribute('srcset', 'https://cdn.example/cover-large.webp');
+    expect(getCoverImage()).toHaveAttribute('src', 'https://cdn.example/cover-feed.webp');
+  });
+
+  it('holds the desktop slot while a kept CDN cover resolves, then takes the preloaded variant', () => {
+    mockUsePostArticle.mockReturnValue({
+      title: 'Test Title',
+      body: 'Test body',
+      coverImage: null,
+      hasCover: true,
+      isCoverLoading: true,
+    });
+    mockUseLocalFilesStore.mockImplementation((selector) =>
+      selector(
+        createMockLocalFilesStore({
+          'user123:post456': [
+            {
+              type: 'image/png',
+              name: 'kept-cover.png',
+              urls: { main: 'https://cdn.example/cover-main.png', feed: 'https://cdn.example/cover-feed.webp' },
+            },
+          ],
+        }),
+      ),
+    );
+
+    const { rerender } = render(<PostArticleDetail {...defaultProps} />);
+
+    // The remote `large` URL is not known until the cover resolves, and the local `main` is the
+    // original upload. With no desktop `srcset` a wide screen takes the local `feed` instead, so
+    // the original never starts downloading on the author's own session.
+    expect(document.querySelector('picture source')).not.toHaveAttribute('srcset');
+    expect(getCoverImage()).toHaveAttribute('src', 'https://cdn.example/cover-feed.webp');
+
+    mockUsePostArticle.mockReturnValue({
+      title: 'Test Title',
+      body: 'Test body',
+      coverImage: {
+        src: 'https://cdn.example/cover-feed.webp',
+        desktopSrc: 'https://cdn.example/cover-large.webp',
+        desktopFallbackSrc: 'https://cdn.example/cover-main.png',
+        alt: 'Remote cover',
+      },
+      hasCover: true,
+      isCoverLoading: false,
+    });
+
+    rerender(<PostArticleDetail {...defaultProps} />);
+
+    expect(document.querySelector('picture source')).toHaveAttribute('srcset', 'https://cdn.example/cover-large.webp');
+  });
+
+  it('keeps a same-session blob cover in the desktop slot', () => {
+    mockUsePostArticle.mockReturnValue({
+      title: 'Test Title',
+      body: 'Test body',
+      coverImage: {
+        src: 'https://cdn.example/old-feed.webp',
+        desktopSrc: 'https://cdn.example/old-large.webp',
+        desktopFallbackSrc: 'https://cdn.example/old-main.png',
+        alt: 'Remote cover',
+      },
+      hasCover: true,
+      isCoverLoading: false,
+    });
+    mockUseLocalFilesStore.mockImplementation((selector) =>
+      selector(
+        createMockLocalFilesStore({
+          'user123:post456': [
+            {
+              type: 'image/png',
+              name: 'new-cover.png',
+              urls: { main: 'blob:http://localhost/new-cover', feed: 'blob:http://localhost/new-cover' },
+            },
+          ],
+        }),
+      ),
+    );
+
+    render(<PostArticleDetail {...defaultProps} />);
+
+    // A file uploaded this session is served from memory and Nexus has no variant for it, so it
+    // owns the desktop slot even though the remote cover resolved.
+    expect(document.querySelector('picture source')).toHaveAttribute('srcset', 'blob:http://localhost/new-cover');
+    expect(getCoverImage()).toHaveAttribute('src', 'blob:http://localhost/new-cover');
+  });
+
+  it('renders a kept CDN cover while the remote cover has not resolved', () => {
+    mockUseLocalFilesStore.mockImplementation((selector) =>
+      selector(
+        createMockLocalFilesStore({
+          'user123:post456': [
+            {
+              type: 'image/png',
+              name: 'kept-cover.png',
+              urls: { main: 'https://cdn.example/cover-main.png', feed: 'https://cdn.example/cover-feed.webp' },
+            },
+          ],
+        }),
+      ),
+    );
+
+    render(<PostArticleDetail {...defaultProps} />);
+
+    // No remote cover to prefer: the local entry is the only source, so it renders both slots.
+    expect(document.querySelector('picture source')).toHaveAttribute('srcset', 'https://cdn.example/cover-main.png');
+    expect(getCoverImage()).toHaveAttribute('src', 'https://cdn.example/cover-feed.webp');
+    expect(getCoverImage()).toHaveAttribute('alt', 'kept-cover.png');
+  });
+
   it('ignores local cover image when first attachment is not an image', () => {
     mockUseLocalFilesStore.mockImplementation((selector) =>
       selector(
@@ -670,6 +911,7 @@ describe('PostArticleDetail', () => {
       attachments: propsWithAttachments.attachments,
       coverImageVariant: POST_COVER_MOBILE_VARIANT,
       coverImageDesktopVariant: POST_COVER_DESKTOP_VARIANT,
+      coverImageDesktopFallbackVariant: POST_COVER_DESKTOP_FALLBACK_VARIANT,
     });
   });
 

@@ -8,6 +8,10 @@ import { FileVariant } from '@/services/nexus/file/file.types';
  * original upload, which can be a multi-megabyte PNG. Both are derived for every image,
  * animated GIFs included, which convert to animated WebP.
  *
+ * `large` only exists once the deploy behind pubky/pubky-nexus#1085 lands. Until then the URL
+ * returns 400, so the hero swaps the desktop candidate to {@link POST_COVER_DESKTOP_FALLBACK_VARIANT}
+ * (`main`) on `error`: a wide screen keeps a usable cover, and the phone candidate is untouched.
+ *
  * A `srcset` cannot express the phone side of that choice: the browser picks a candidate by
  * `sizes × DPR`, so a 3x phone asks for roughly 1170w and takes the biggest candidate. Measured
  * on a 390 CSS px viewport with `srcset="feed 720w, main 2048w"` and `sizes="100vw"`: DPR 1
@@ -18,6 +22,16 @@ import { FileVariant } from '@/services/nexus/file/file.types';
  */
 export const POST_COVER_MOBILE_VARIANT = FileVariant.FEED;
 export const POST_COVER_DESKTOP_VARIANT = FileVariant.LARGE;
+
+/**
+ * The desktop source to use when {@link POST_COVER_DESKTOP_VARIANT} fails to load.
+ *
+ * `large` is derived on request, so it 400s until the Nexus deploy that carries it is out.
+ * `PostArticleDetail` swaps the desktop `<source>` to this variant on the hero `<img>`'s `error`
+ * event, which is the pre-`large` behaviour for a wide screen (the untouched upload) and keeps the
+ * phone on `feed`.
+ */
+export const POST_COVER_DESKTOP_FALLBACK_VARIANT = FileVariant.MAIN;
 
 /** Tailwind `lg`: at and above it the hero's column is wide enough to want `large`. */
 export const POST_COVER_DESKTOP_MEDIA = '(min-width: 1024px)';
