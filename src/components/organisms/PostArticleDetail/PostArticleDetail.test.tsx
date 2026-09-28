@@ -224,6 +224,7 @@ describe('PostArticleDetail', () => {
       body: 'Test article body content',
       coverImage: null,
       hasCover: true,
+      isCoverLoading: false,
     });
     mockUseLocalFilesStore.mockImplementation((selector) => selector(createMockLocalFilesStore()));
   });
@@ -352,6 +353,7 @@ describe('PostArticleDetail', () => {
         alt: 'Cover image',
       },
       hasCover: true,
+      isCoverLoading: false,
     });
 
     render(<PostArticleDetail {...defaultProps} />);
@@ -369,6 +371,7 @@ describe('PostArticleDetail', () => {
         alt: 'Cover image',
       },
       hasCover: true,
+      isCoverLoading: false,
     });
 
     render(<PostArticleDetail {...defaultProps} />);
@@ -388,6 +391,7 @@ describe('PostArticleDetail', () => {
         alt: 'Cover image',
       },
       hasCover: true,
+      isCoverLoading: false,
     });
 
     render(<PostArticleDetail {...defaultProps} />);
@@ -409,6 +413,7 @@ describe('PostArticleDetail', () => {
         alt: 'Cover image',
       },
       hasCover: true,
+      isCoverLoading: false,
     });
 
     render(<PostArticleDetail {...defaultProps} />);
@@ -427,6 +432,7 @@ describe('PostArticleDetail', () => {
         alt: 'Cover image',
       },
       hasCover: true,
+      isCoverLoading: false,
     });
 
     render(<PostArticleDetail {...defaultProps} />);
@@ -440,6 +446,7 @@ describe('PostArticleDetail', () => {
       body: 'Test body',
       coverImage: null,
       hasCover: true,
+      isCoverLoading: false,
     });
 
     render(<PostArticleDetail {...defaultProps} />);
@@ -456,6 +463,7 @@ describe('PostArticleDetail', () => {
         alt: 'Cover image',
       },
       hasCover: true,
+      isCoverLoading: false,
     });
 
     render(<PostArticleDetail {...defaultProps} isBlurred />);
@@ -493,6 +501,7 @@ describe('PostArticleDetail', () => {
         alt: 'Remote cover',
       },
       hasCover: true,
+      isCoverLoading: false,
     });
     mockUseLocalFilesStore.mockImplementation((selector) =>
       selector(
@@ -543,6 +552,7 @@ describe('PostArticleDetail', () => {
         alt: 'Remote fallback',
       },
       hasCover: true,
+      isCoverLoading: false,
     });
     mockUseLocalFilesStore.mockImplementation((selector) =>
       selector(
@@ -652,6 +662,7 @@ describe('PostArticleDetail', () => {
         alt: 'Article cover',
       },
       hasCover: true,
+      isCoverLoading: false,
     });
 
     const { container } = render(
