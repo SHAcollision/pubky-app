@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GraphController } from '@/controllers/graph/graph';
 import { PostController } from '@/controllers/post/post';
+import { TagCacheController } from '@/controllers/tag/tag-cache';
 import { UserController } from '@/controllers/user/user';
 import { useGraphStore } from '@/stores/graph/graph.store';
 import { useStreamGraph } from './useStreamGraph';
@@ -10,7 +11,10 @@ vi.mock('@/controllers/graph/graph', () => ({
   GraphController: { fetchNeighborhood: vi.fn(), fetchPath: vi.fn(), hydrateEntities: vi.fn() },
 }));
 vi.mock('@/controllers/post/post', () => ({
-  PostController: { getDetailsByIds: vi.fn(), getRelationships: vi.fn(), getTags: vi.fn() },
+  PostController: { getDetailsByIds: vi.fn(), getRelationships: vi.fn() },
+}));
+vi.mock('@/controllers/tag/tag-cache', () => ({
+  TagCacheController: { get: vi.fn() },
 }));
 vi.mock('@/controllers/user/user', () => ({
   UserController: { getManyDetails: vi.fn(), getManyRelationships: vi.fn() },
@@ -34,7 +38,7 @@ describe('useStreamGraph', () => {
       { id: COMPOSITE, content: 'hello graph', kind: 'short', indexed_at: 100, attachments: null },
     ] as never);
     vi.mocked(PostController.getRelationships).mockResolvedValue({ replied: null, reposted: null } as never);
-    vi.mocked(PostController.getTags).mockResolvedValue([] as never);
+    vi.mocked(TagCacheController.get).mockResolvedValue(null);
     vi.mocked(UserController.getManyDetails).mockResolvedValue(
       new Map([[AUTHOR, { name: 'Author One', image: null }]]) as never,
     );
@@ -79,9 +83,10 @@ describe('useStreamGraph', () => {
   });
 
   it('keeps the searched tags visible without a click, and reveals a hub when its chip is clicked', async () => {
-    vi.mocked(PostController.getTags).mockResolvedValue([
-      { id: COMPOSITE, tags: [{ label: 'dev', taggers: [], taggers_count: 3, relationship: false }] },
-    ] as never);
+    vi.mocked(TagCacheController.get).mockResolvedValue({
+      id: COMPOSITE,
+      tags: [{ label: 'dev', taggers: [], taggers_count: 3, relationship: false }],
+    } as never);
 
     const { result, rerender } = renderHook(({ pinned }: { pinned: string[] }) => useStreamGraph([COMPOSITE], pinned), {
       initialProps: { pinned: [] as string[] },
@@ -98,9 +103,10 @@ describe('useStreamGraph', () => {
   });
 
   it('marks an already-synthesized hub expanded when addTag short-circuits', async () => {
-    vi.mocked(PostController.getTags).mockResolvedValue([
-      { id: COMPOSITE, tags: [{ label: 'dev', taggers: [], taggers_count: 3, relationship: false }] },
-    ] as never);
+    vi.mocked(TagCacheController.get).mockResolvedValue({
+      id: COMPOSITE,
+      tags: [{ label: 'dev', taggers: [], taggers_count: 3, relationship: false }],
+    } as never);
 
     const { result } = renderHook(() => useStreamGraph([COMPOSITE]));
     await waitFor(() => expect(result.current.rawNodeCount).toBe(4));

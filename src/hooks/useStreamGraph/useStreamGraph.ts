@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { PostController } from '@/controllers/post/post';
+import { TagCacheController } from '@/controllers/tag/tag-cache';
 import { UserController } from '@/controllers/user/user';
 import { markBirths, type SimNode, useGraphCore } from '@/hooks/useGraphCore/useGraphCore';
 import { type HideableClass } from '@/hooks/useSocialGraph/useSocialGraph.types';
@@ -209,7 +210,7 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
             const d = details[i];
             const [relationships, tags] = await Promise.all([
               PostController.getRelationships({ compositeId }).catch(() => null),
-              PostController.getTags({ compositeId }).catch(() => []),
+              TagCacheController.get({ kind: 'post', id: compositeId }).catch(() => null),
             ]);
             const author = d ? tryParseCompositeId(d.id)?.pubky : undefined;
             return {
@@ -217,7 +218,7 @@ export function useStreamGraph(postIds: string[], pinnedTagLabels: string[] = []
               details: d && author ? { content: d.content, kind: d.kind, indexed_at: d.indexed_at, author } : null,
               repliedUri: relationships?.replied ?? null,
               repostedUri: relationships?.reposted ?? null,
-              tagLabels: (tags ?? []).flatMap((collection) => collection.tags.map((tag) => tag.label)),
+              tagLabels: (tags?.tags ?? []).map((tag) => tag.label),
             };
           }),
         );

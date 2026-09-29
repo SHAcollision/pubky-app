@@ -53,7 +53,7 @@ Controller naming encodes IO: `fetch*` network only, `get*` local only, `getMany
   or retry logic inside `useLiveQuery`; no hand-rolled `useEffect` + `useLiveQuery`. A cache hit is never refreshed by it,
   a tombstone counts as data, a settled `null` means missing. `docs/local-first.md`
 - Local-first writes: Dexie first, homeserver sync after, roll back on failure, refresh every affected `*_ttl` row, persist
-  dependencies before dependents. `docs/local-first.md`, `docs/data-patterns.md`
+  dependencies before dependents; stream cursors only from Nexus, never `indexed_at`. `docs/local-first.md`, `docs/data-patterns.md`
 - Composite post ids `author:postId` via `buildCompositeId` / `parseCompositeId`. `docs/data-patterns.md`
 - Shadcn first and design tokens only (`bg-primary`, not `bg-[#1a1a1a]` or `p-[13px]`); atomic tiers atoms → molecules →
   organisms → templates; z-index only `-z-10, z-10, z-30, z-40, z-50, z-60`. `docs/components.md`, `docs/z-index.md`
@@ -73,8 +73,8 @@ Controller naming encodes IO: `fetch*` network only, `get*` local only, `getMany
   CI workflows change only in a CI task.
 - Env: only `src/libs/env/env.ts` and `src/libs/runtime-config/**` read `process.env.NEXT_PUBLIC_*` / `PUBKY_RUNTIME_*`
   (ESLint-enforced); deploy-time values are `PUBKY_RUNTIME_*` getters, never secrets. `docs/environment.md`
-- Sentry: throw via `Err.*`; `Sentry.captureException` is called only in `app/error.tsx` and `app/global-error.tsx`, for
-  non-`AppError` values; no raw user data in error context. `docs/sentry.md`
+- Observability: throw via `Err.*`; they capture to Sentry and, in a consenting browser, Pulse. No other direct
+  `captureException` except `app/error.tsx` / `app/global-error.tsx`, for non-`AppError` values; no raw user data. `docs/sentry.md`
 - Tests: colocated `*.test.tsx`, one snapshot per test, mobile snapshot blocks for viewport-aware organisms; no `as any` or
   `as unknown as T` (use the `src/test-utils` helpers). `docs/component-testing.md`
 
@@ -84,7 +84,7 @@ Controller naming encodes IO: `fetch*` network only, `get*` local only, `getMany
 - `src/hooks/**` → `docs/local-first.md`, `docs/data-patterns.md`, `docs/components.md` (Forms)
 - `src/components/**`, `src/app/**` → `docs/components.md`, `docs/z-index.md`, `docs/skeleton-architecture.md`,
   `docs/component-testing.md`
-- `src/test/vrt/**` → `docs/visual-regression-testing.md`
+- `src/test/vrt/**` → `docs/visual-regression-testing.md`; `src/sw.ts`, `public/manifest.json`, `src/libs/pwa/**` → `docs/pwa.md`
 - `src/libs/env/**`, `src/libs/runtime-config/**`, `src/config/**` → `docs/environment.md`
 - `src/libs/observability/**`, `src/instrumentation*.ts`, `src/sentry.*.config.ts` → `docs/sentry.md`
 - `src/core/database/**`, `src/core/services/homeserver/**`, `src/core/pipes/**`, `src/libs/network/**` →
@@ -139,8 +139,9 @@ are owned by QA: flag an invalidated spec, do not edit or run e2e yourself. `doc
 
 ## Tooling map
 
-- `CLAUDE.md` imports this file for Claude Code; Codex and Cursor read it directly. Keep it within 150 lines; details go
-  in `docs/`.
+- `CLAUDE.md` imports this file for Claude Code; Codex and Cursor read it directly. Keep it short; details go in `docs/`.
+- `next dev` would append its own agent-rules block here; `agentRules` is off in `next.config.ts` so it never does. The
+  installed Next.js version's docs are in `node_modules/next/dist/docs/`; read the relevant page before using a Next API.
 - `.cursor/rules/*.mdc` and `.claude/rules/*.md` attach the matching doc when a file under their glob is edited; their
   bodies only point at `docs/`.
 - Skills live in `.agents/skills/<name>/` (read natively by Codex and Cursor, symlinked from `.claude/skills/` for Claude

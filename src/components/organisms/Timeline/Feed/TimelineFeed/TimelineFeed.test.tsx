@@ -87,10 +87,10 @@ vi.mock('@/hooks/useFeedLayoutResolution/useFeedLayoutResolution', () => ({
   useFeedLayoutResolution: vi.fn(() => ({
     requestedLayout: 'columns',
     effectiveLayout: 'columns',
+    isCardsActive: false,
     isVisualRequested: false,
     isVisualActive: false,
     isGraphActive: false,
-    isGridActive: false,
     isPhoneViewport: false,
   })),
 }));
@@ -244,30 +244,30 @@ const defaultPaginationResult = {
 const visualLayoutResolution = {
   requestedLayout: 'visual' as const,
   effectiveLayout: 'visual' as const,
+  isCardsActive: false,
   isVisualRequested: true,
   isVisualActive: true,
   isGraphActive: false,
-  isGridActive: false,
   isPhoneViewport: false,
 };
 
 const phoneColumnsLayoutResolution = {
   requestedLayout: 'visual' as const,
   effectiveLayout: 'columns' as const,
+  isCardsActive: false,
   isVisualRequested: true,
   isVisualActive: false,
   isGraphActive: false,
-  isGridActive: false,
   isPhoneViewport: true,
 };
 
 const columnsLayoutResolution = {
   requestedLayout: 'columns' as const,
   effectiveLayout: 'columns' as const,
+  isCardsActive: false,
   isVisualRequested: false,
   isVisualActive: false,
   isGraphActive: false,
-  isGridActive: false,
   isPhoneViewport: false,
 };
 
@@ -330,10 +330,10 @@ describe('TimelineFeed', () => {
     mockUseFeedLayoutResolution.mockReturnValue({
       requestedLayout: 'columns',
       effectiveLayout: 'columns',
+      isCardsActive: false,
       isVisualRequested: false,
       isVisualActive: false,
       isGraphActive: false,
-      isGridActive: false,
       isPhoneViewport: false,
     });
     // Reset pull-to-refresh mock to idle state
@@ -378,10 +378,10 @@ describe('TimelineFeed', () => {
       mockUseFeedLayoutResolution.mockReturnValue({
         requestedLayout: 'visual',
         effectiveLayout: 'visual',
+        isCardsActive: false,
         isVisualRequested: true,
         isVisualActive: true,
         isGraphActive: false,
-        isGridActive: false,
         isPhoneViewport: false,
       });
 
@@ -395,10 +395,10 @@ describe('TimelineFeed', () => {
       mockUseFeedLayoutResolution.mockReturnValue({
         requestedLayout: 'visual',
         effectiveLayout: 'columns',
+        isCardsActive: false,
         isVisualRequested: true,
         isVisualActive: false,
         isGraphActive: false,
-        isGridActive: false,
         isPhoneViewport: true,
       });
 
@@ -416,10 +416,10 @@ describe('TimelineFeed', () => {
       mockUseFeedLayoutResolution.mockReturnValue({
         requestedLayout: 'visual',
         effectiveLayout: 'visual',
+        isCardsActive: false,
         isVisualRequested: true,
         isVisualActive: true,
         isGraphActive: false,
-        isGridActive: false,
         isPhoneViewport: false,
       });
 
@@ -436,10 +436,10 @@ describe('TimelineFeed', () => {
       mockUseFeedLayoutResolution.mockReturnValue({
         requestedLayout: 'visual',
         effectiveLayout: 'visual',
+        isCardsActive: false,
         isVisualRequested: true,
         isVisualActive: true,
         isGraphActive: false,
-        isGridActive: false,
         isPhoneViewport: false,
       });
 
@@ -454,10 +454,10 @@ describe('TimelineFeed', () => {
       mockUseFeedLayoutResolution.mockReturnValue({
         requestedLayout: 'visual',
         effectiveLayout: 'visual',
+        isCardsActive: false,
         isVisualRequested: true,
         isVisualActive: true,
         isGraphActive: false,
-        isGridActive: false,
         isPhoneViewport: false,
       });
 
@@ -523,10 +523,10 @@ describe('TimelineFeed', () => {
       mockUseFeedLayoutResolution.mockReturnValue({
         requestedLayout: 'columns',
         effectiveLayout: 'columns',
+        isCardsActive: true,
         isVisualRequested: false,
         isVisualActive: false,
         isGraphActive: false,
-        isGridActive: true,
         isPhoneViewport: false,
       });
 
@@ -582,10 +582,10 @@ describe('TimelineFeed', () => {
       mockUseFeedLayoutResolution.mockReturnValue({
         requestedLayout: 'visual',
         effectiveLayout: 'visual',
+        isCardsActive: false,
         isVisualRequested: true,
         isVisualActive: true,
         isGraphActive: false,
-        isGridActive: false,
         isPhoneViewport: false,
       });
 
@@ -873,7 +873,7 @@ describe('TimelineFeed', () => {
       }
     });
 
-    it('keeps ids outside the envelope for a signed-out viewer, whose envelope never refreshes', () => {
+    it('mirrors the envelope for a signed-out viewer too, whose envelope the public TTL refreshes', () => {
       orderedEnvelope();
       mockUseStreamPagination.mockReturnValue({
         ...defaultPaginationResult,
@@ -882,10 +882,8 @@ describe('TimelineFeed', () => {
 
       render(<TimelineFeed variant={TIMELINE_FEED_VARIANT.COLLECTION} requestedLayout={LAYOUT.COLUMNS} />);
 
-      expect(screen.getByTestId('timeline-posts')).toHaveAttribute(
-        'data-post-ids',
-        'author_a:post_a,author_b:post_b,stranger:post_x',
-      );
+      // The guest's count badge follows the refreshed envelope, so the grid must too.
+      expect(screen.getByTestId('timeline-posts')).toHaveAttribute('data-post-ids', 'author_a:post_a,author_b:post_b');
     });
 
     it('keeps ids outside the envelope for the owner, appended after the envelope order', () => {
