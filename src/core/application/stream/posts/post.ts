@@ -725,14 +725,15 @@ export class PostStreamApplication {
    *
    * @param postIds - Composite post IDs to ensure are cached
    * @param viewerId - Optional viewer ID for relationship data
+   * @param isCurrent - Optional viewer-session guard; stale results are not persisted
    */
-  static async getOrFetchPosts({ postIds, viewerId }: TGetOrFetchPostsParams): Promise<void> {
+  static async getOrFetchPosts({ postIds, viewerId, isCurrent }: TGetOrFetchPostsParams): Promise<void> {
     if (postIds.length === 0) return;
 
     const cacheMissPostIds = await this.getNotPersistedPostsInCache(postIds);
     if (cacheMissPostIds.length === 0) return;
 
-    await this.fetchMissingPostsFromNexus({ cacheMissPostIds, viewerId });
+    await this.fetchMissingPostsFromNexus({ cacheMissPostIds, viewerId, isCurrent });
   }
 
   /**

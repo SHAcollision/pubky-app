@@ -2,6 +2,7 @@ import { GraphApplication } from '@/application/graph/graph';
 import { PostStreamApplication } from '@/application/stream/posts/post';
 import { UserStreamApplication } from '@/application/stream/users/users';
 import { UserApplication } from '@/application/user/user';
+import { captureViewerSession } from '@/controllers/tag/tag-cache.utils';
 import { Logger } from '@/libs/logger/logger';
 import type { Pubky } from '@/models/models.types';
 import { buildCompositeId } from '@/models/models.utils';
@@ -39,6 +40,8 @@ export class GraphController {
    * @param viewerId - Optional viewer for relationship data on the hydrated entities
    */
   static async hydrateEntities(graph: NexusGraph, viewerId?: Pubky | null): Promise<void> {
+    // A slow backfill must not repopulate Dexie after logout or an account switch
+    const isCurrent = captureViewerSession();
     try {
       const userIds: Pubky[] = [];
       const postIds: string[] = [];
@@ -47,8 +50,8 @@ export class GraphController {
         else if (node.kind === 'post') postIds.push(buildCompositeId({ pubky: node.author_id, id: node.post_id }));
       }
       await Promise.all([
-        UserStreamApplication.getOrFetchUsers({ userIds, viewerId: viewerId ?? undefined }),
-        PostStreamApplication.getOrFetchPosts({ postIds, viewerId }),
+        UserStreamApplication.getOrFetchUsers({ userIds, viewerId: viewerId ?? undefined, isCurrent }),
+        PostStreamApplication.getOrFetchPosts({ postIds, viewerId, isCurrent }),
       ]);
       // A user cached through a details-only path has no relationship row, and
       // the hover card would read that as "not following". The stream miss
@@ -57,7 +60,11 @@ export class GraphController {
         const known = await UserApplication.getManyRelationships({ userIds });
         const withoutRelationship = userIds.filter((id) => !known.has(id));
         if (withoutRelationship.length > 0) {
-          await UserStreamApplication.fetchMissingUsersFromNexus({ cacheMissUserIds: withoutRelationship, viewerId });
+          await UserStreamApplication.fetchMissingUsersFromNexus({
+            cacheMissUserIds: withoutRelationship,
+            viewerId,
+            isCurrent,
+          });
         }
       }
       // Users persisted earlier through the details-only path have no user_tags
@@ -65,7 +72,7 @@ export class GraphController {
       // render them without profile-tag chips forever. Runs after the stream
       // ingestion so freshly persisted tags are not re-fetched; does its own
       // tags-table miss check internally.
-      await UserApplication.getManyTagsOrFetch({ userIds });
+      await UserApplication.getManyTagsOrFetch({ userIds, viewerId: viewerId ?? undefined, isCurrent });
     } catch (error) {
       Logger.warn('GraphController: failed to hydrate graph entities', { error });
     }

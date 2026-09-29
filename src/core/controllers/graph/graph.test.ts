@@ -69,16 +69,28 @@ describe('GraphController', () => {
   it('hydrateEntities backfills the users, posts and profile tags behind a payload', async () => {
     await GraphController.hydrateEntities(GRAPH, VIEWER);
 
-    expect(UserStreamApplication.getOrFetchUsers).toHaveBeenCalledWith({ userIds: [ALICE, BOB], viewerId: VIEWER });
+    const isCurrent = expect.any(Function);
+    expect(UserStreamApplication.getOrFetchUsers).toHaveBeenCalledWith({
+      userIds: [ALICE, BOB],
+      viewerId: VIEWER,
+      isCurrent,
+    });
     expect(PostStreamApplication.getOrFetchPosts).toHaveBeenCalledWith({
       postIds: [`${ALICE}:0032ABC`],
       viewerId: VIEWER,
+      isCurrent,
     });
-    expect(UserApplication.getManyTagsOrFetch).toHaveBeenCalledWith({ userIds: [ALICE, BOB] });
+    // Tags are stored per viewer, so the backfill is scoped to the same viewer
+    expect(UserApplication.getManyTagsOrFetch).toHaveBeenCalledWith({
+      userIds: [ALICE, BOB],
+      viewerId: VIEWER,
+      isCurrent,
+    });
     // Bob has details but no relationship row for this viewer: fetched in full
     expect(UserStreamApplication.fetchMissingUsersFromNexus).toHaveBeenCalledWith({
       cacheMissUserIds: [BOB],
       viewerId: VIEWER,
+      isCurrent,
     });
   });
 
