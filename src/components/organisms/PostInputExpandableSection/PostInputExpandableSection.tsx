@@ -34,6 +34,8 @@ export function PostInputExpandableSection({
   onEmojiSelect,
   onImageClick,
   onArticleClick,
+  lockSwitch,
+  lockCard,
 }: PostInputExpandableSectionProps) {
   const hasContent = content.trim().length > 0;
   const isUiDisabled = isSubmitting || isDisabled;
@@ -48,6 +50,9 @@ export function PostInputExpandableSection({
       <Container className="gap-4">
         {hasContent && !isArticle && <PostLinkEmbeds content={content} />}
 
+        {/* Stands in for the content the lock switch stashed away. */}
+        {lockCard}
+
         <PostInputTags tags={tags} onTagsChange={setTags} disabled={isUiDisabled || isEdit} />
 
         <PostInputActionBar
@@ -59,9 +64,10 @@ export function PostInputExpandableSection({
           isSubmitting={isSubmitting}
           postButtonLabel={postButtonLabel}
           postButtonAriaLabel={postButtonAriaLabel}
-          hideArticleButton={submitMode !== POST_INPUT_VARIANT.POST || !!isArticle}
+          hideArticleButton={submitMode !== POST_INPUT_VARIANT.POST || !!isArticle || !!lockCard}
           isArticle={isArticle}
           postButtonIcon={submitIcon ?? IconsButton[submitMode]}
+          lockSwitch={lockSwitch}
         />
       </Container>
 
