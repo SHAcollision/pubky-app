@@ -13,6 +13,8 @@ import { useFollowUser } from '@/hooks/useFollowUser/useFollowUser';
 import { useIsFollowing } from '@/hooks/useIsFollowing/useIsFollowing';
 import type { GraphRelationship } from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { useTtlSubscription } from '@/hooks/useTtlSubscription/useTtlSubscription';
+import { trackPulseEvent } from '@/libs/observability/pulse';
+import { PULSE_EVENT } from '@/libs/observability/pulse.constants';
 import { cn, formatPublicKey } from '@/libs/utils/utils';
 import { AvatarGroup } from '@/molecules/AvatarGroup/AvatarGroup';
 import { FollowButton } from '@/molecules/FollowButton/FollowButton';
@@ -76,6 +78,8 @@ export function SocialGraphNodePanel({
   // Keep the pinned profile fresh while it is on screen, like other user
   // surfaces do (posts get the same treatment inside PostPreviewCard)
   const { ref: ttlRef } = useTtlSubscription({ type: 'user', id: targetPubky });
+  const trackAction = (action: string) =>
+    trackPulseEvent(PULSE_EVENT.GRAPH_NODE_ACTION, { action, node_kind: node.kind });
 
   const expandButton = (
     <Button
@@ -163,7 +167,10 @@ export function SocialGraphNodePanel({
               variant="secondary"
               size="sm"
               className="flex-1"
-              onClick={() => onFocus(node.id)}
+              onClick={() => {
+                trackAction('focus');
+                onFocus(node.id);
+              }}
               data-cy="graph-panel-focus"
             >
               {'Focus'}
@@ -178,11 +185,16 @@ export function SocialGraphNodePanel({
                 isFollowing={isFollowing}
                 isLoading={isUserLoading(node.pubky)}
                 isStatusLoading={isFollowStatusLoading}
-                onClick={() => toggleFollow(node.pubky, isFollowing)}
+                onClick={() => {
+                  trackAction(isFollowing ? 'unfollow' : 'follow');
+                  void toggleFollow(node.pubky, isFollowing);
+                }}
               />
             )}
             <Button variant="secondary" size="sm" className="flex-1" asChild>
-              <Link href={getUserProfileUrl(node.pubky, currentUserPubky)}>{'Profile'}</Link>
+              <Link href={getUserProfileUrl(node.pubky, currentUserPubky)} onClick={() => trackAction('profile')}>
+                {'Profile'}
+              </Link>
             </Button>
           </div>
 
@@ -210,7 +222,10 @@ export function SocialGraphNodePanel({
               variant="secondary"
               size="sm"
               className="flex-1"
-              onClick={() => setReplyOpen(true)}
+              onClick={() => {
+                trackAction('reply');
+                setReplyOpen(true);
+              }}
               data-cy="graph-panel-reply"
             >
               <MessageCircle className="size-4" />
@@ -218,7 +233,12 @@ export function SocialGraphNodePanel({
             </Button>
           </div>
           <Button variant="secondary" size="sm" className="w-full" asChild>
-            <Link href={`${POST_ROUTES.POST}/${node.author_id}/${node.post_id}`}>{'Open post'}</Link>
+            <Link
+              href={`${POST_ROUTES.POST}/${node.author_id}/${node.post_id}`}
+              onClick={() => trackAction('open_post')}
+            >
+              {'Open post'}
+            </Link>
           </Button>
           <DialogReply
             postId={`${node.author_id}:${node.post_id}`}
@@ -243,7 +263,12 @@ export function SocialGraphNodePanel({
           <div className="flex gap-2">
             {expandButton}
             <Button variant="secondary" size="sm" className="flex-1" asChild>
-              <Link href={`${APP_ROUTES.SEARCH}?tags=${encodeURIComponent(node.label)}`}>{'Search'}</Link>
+              <Link
+                href={`${APP_ROUTES.SEARCH}?tags=${encodeURIComponent(node.label)}`}
+                onClick={() => trackAction('tag_search')}
+              >
+                {'Search'}
+              </Link>
             </Button>
           </div>
         </>

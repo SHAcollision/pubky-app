@@ -1,7 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { trackPulseEvent } from '@/libs/observability/pulse';
 import { LAYOUT, type LayoutType } from '@/stores/home/home.types';
 import { FilterLayout } from './FilterLayout';
+
+vi.mock('@/libs/observability/pulse', () => ({ trackPulseEvent: vi.fn() }));
 
 describe('FilterLayout', () => {
   it('renders with default selected tab', () => {
@@ -138,5 +141,21 @@ describe('FilterLayout - Snapshots', () => {
   it('matches snapshot with hidden visual selection normalized to columns', () => {
     const { container } = render(<FilterLayout selectedTab={LAYOUT.VISUAL} showVisual={false} />);
     expect(container.firstChild).toMatchSnapshot();
+  });
+
+  it('reports choosing the graph layout, and no other layout', () => {
+    vi.mocked(trackPulseEvent).mockClear();
+    const onTabChange = vi.fn();
+    const { rerender } = render(<FilterLayout showVisual selectedTab={LAYOUT.COLUMNS} onTabChange={onTabChange} />);
+
+    fireEvent.click(screen.getByText('Wide'));
+    fireEvent.click(screen.getByText('Graph'));
+    expect(onTabChange).toHaveBeenLastCalledWith(LAYOUT.GRAPH);
+    expect(trackPulseEvent).toHaveBeenCalledExactlyOnceWith('graph_layout_selected');
+
+    // Re-picking the active graph layout is not a new choice
+    rerender(<FilterLayout showVisual selectedTab={LAYOUT.GRAPH} onTabChange={onTabChange} />);
+    fireEvent.click(screen.getByText('Graph'));
+    expect(trackPulseEvent).toHaveBeenCalledTimes(1);
   });
 });

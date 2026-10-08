@@ -1,6 +1,9 @@
 import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { trackPulseEvent } from '@/libs/observability/pulse';
 import { SocialGraphControls } from './SocialGraphControls';
+
+vi.mock('@/libs/observability/pulse', () => ({ trackPulseEvent: vi.fn() }));
 
 const props = {
   onZoomIn: vi.fn(),
@@ -60,5 +63,21 @@ describe('SocialGraphControls', () => {
       <SocialGraphControls {...props} advancedContent={<div />} onToggleFullscreen={onToggleFullscreen} isFullscreen />,
     );
     expect(document.querySelector('[data-cy="graph-fullscreen"]')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('reports pill usage to Pulse, but not zoom clicks', () => {
+    vi.mocked(trackPulseEvent).mockClear();
+    render(<SocialGraphControls {...props} timeMachineOn isFullscreen={false} />);
+
+    fireEvent.click(document.querySelector('[data-cy="graph-zoom-in"]')!);
+    fireEvent.click(document.querySelector('[data-cy="graph-time-toggle"]')!);
+    fireEvent.click(document.querySelector('[data-cy="graph-recenter"]')!);
+    fireEvent.click(document.querySelector('[data-cy="graph-fullscreen"]')!);
+
+    expect(vi.mocked(trackPulseEvent).mock.calls).toEqual([
+      ['graph_control_used', { control: 'time_machine', enabled: false }],
+      ['graph_control_used', { control: 'recenter' }],
+      ['graph_control_used', { control: 'fullscreen', enabled: true }],
+    ]);
   });
 });

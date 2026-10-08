@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { UseStreamGraphResult } from '@/hooks/useStreamGraph/useStreamGraph';
+import { trackPulseEvent } from '@/libs/observability/pulse';
 import { StreamGraphPosts } from './StreamGraphPosts';
 
 // Mutated per test; the mock factory reads it lazily on every render
@@ -57,6 +58,8 @@ vi.mock('@/organisms/SocialGraph/SocialGraph', () => ({
 vi.mock('@/stores/auth/auth.store', () => ({
   useAuthStore: () => ({ currentUserPubky: null }),
 }));
+
+vi.mock('@/libs/observability/pulse', () => ({ trackPulseEvent: vi.fn() }));
 
 const props = {
   postIds: ['a:1'],
@@ -124,5 +127,13 @@ describe('StreamGraphPosts', () => {
     render(<StreamGraphPosts {...props} />);
 
     expect(streamArgs[1]).toEqual([]);
+  });
+
+  it('reports one graph feed view per mount, however often it re-renders', () => {
+    vi.mocked(trackPulseEvent).mockClear();
+    const { rerender } = render(<StreamGraphPosts {...props} />);
+    rerender(<StreamGraphPosts {...props} loadingMore />);
+
+    expect(trackPulseEvent).toHaveBeenCalledExactlyOnceWith('graph_feed_viewed', { signed_in: false });
   });
 });

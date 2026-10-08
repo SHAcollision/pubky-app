@@ -1,6 +1,10 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GraphController } from '@/controllers/graph/graph';
+import { ClientErrorCode } from '@/libs/error/error.codes';
+import { Err } from '@/libs/error/error.factories';
+import { ErrorService } from '@/libs/error/error.types';
+import { startPulseOperation, trackPulseEvent } from '@/libs/observability/pulse';
 import type { NexusGraph } from '@/services/nexus/graph/graph.types';
 import { useGraphStore } from '@/stores/graph/graph.store';
 import { useSocialGraph } from './useSocialGraph';
@@ -11,6 +15,12 @@ vi.mock('@/controllers/graph/graph', () => ({
 
 vi.mock('@/molecules/Toaster/toast', () => ({
   toast: vi.fn(),
+}));
+
+const pulseOperation = vi.hoisted(() => ({ complete: vi.fn(), fail: vi.fn(), cancel: vi.fn() }));
+vi.mock('@/libs/observability/pulse', () => ({
+  startPulseOperation: vi.fn(() => pulseOperation),
+  trackPulseEvent: vi.fn(),
 }));
 
 vi.mock('@/libs/logger/logger', () => ({
@@ -291,5 +301,200 @@ describe('useSocialGraph', () => {
     // Opacity re-anchors on the focused user (mutuals, so me reads direct)
     expect(result.current.opacityTiers.get('user:friend')).toBe('center');
     expect(result.current.opacityTiers.get(`user:${ME}`)).toBe('direct');
+  });
+
+  describe('Pulse telemetry', () => {
+    const userNode = (pubky: string) => ({
+      kind: 'user' as const,
+      id: `user:${pubky}`,
+      pubky,
+      name: pubky,
+      image: null,
+    });
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('times the initial load and completes with its size', async () => {
+      await loadedHook();
+
+      expect(startPulseOperation).toHaveBeenCalledExactlyOnceWith('graph-neighborhood-load', {
+        signed_in: true,
+        is_self: true,
+      });
+      expect(pulseOperation.complete).toHaveBeenCalledExactlyOnceWith({ node_count: 4, edge_count: 4 });
+    });
+
+    it('cancels a load that a newer load superseded', async () => {
+      let resolveFirst: (graph: NexusGraph) => void = () => {};
+      mockGetNeighborhood
+        .mockReturnValueOnce(new Promise<NexusGraph>((resolve) => (resolveFirst = resolve)))
+        .mockResolvedValueOnce(initialGraph);
+      const { result } = renderHook(() => useSocialGraph());
+      act(() => {
+        void result.current.load(ME);
+      });
+      act(() => {
+        void result.current.load('friend');
+      });
+      await waitFor(() => expect(pulseOperation.complete).toHaveBeenCalledTimes(1));
+
+      await act(async () => {
+        resolveFirst(initialGraph);
+      });
+
+      expect(pulseOperation.cancel).toHaveBeenCalledTimes(1);
+      expect(pulseOperation.complete).toHaveBeenCalledTimes(1);
+    });
+
+    it('fails the load metric with the error', async () => {
+      const error = new Error('boom');
+      mockGetNeighborhood.mockRejectedValueOnce(error);
+      const { result } = renderHook(() => useSocialGraph());
+
+      await act(async () => {
+        await result.current.load(ME);
+      });
+
+      expect(pulseOperation.fail).toHaveBeenCalledExactlyOnceWith(error);
+      expect(pulseOperation.complete).not.toHaveBeenCalled();
+    });
+
+    it('times expansions and refreshes with the node kind and trigger', async () => {
+      const { result } = await loadedHook();
+      vi.clearAllMocks();
+      mockGetNeighborhood.mockResolvedValue({ nodes: [userNode('friend')], edges: [] });
+
+      await act(async () => {
+        await result.current.expand('user:friend');
+      });
+      await act(async () => {
+        await result.current.refreshNode('user:friend');
+      });
+
+      expect(vi.mocked(startPulseOperation).mock.calls).toEqual([
+        ['graph-node-expand', { node_kind: 'user', trigger: 'expand' }],
+        ['graph-node-expand', { node_kind: 'user', trigger: 'refresh' }],
+      ]);
+      expect(pulseOperation.complete).toHaveBeenCalledTimes(2);
+    });
+
+    it('never starts an expansion it drops as already expanded', async () => {
+      const { result } = await loadedHook();
+      vi.clearAllMocks();
+
+      await act(async () => {
+        await result.current.expand(`user:${ME}`);
+      });
+
+      expect(startPulseOperation).not.toHaveBeenCalled();
+    });
+
+    it('fails the expand metric when the fetch fails', async () => {
+      const { result } = await loadedHook();
+      vi.clearAllMocks();
+      const error = new Error('boom');
+      mockGetNeighborhood.mockRejectedValueOnce(error);
+
+      await act(async () => {
+        await result.current.expand('user:friend');
+      });
+
+      expect(pulseOperation.fail).toHaveBeenCalledExactlyOnceWith(error);
+    });
+
+    it('completes a found path with its hop count', async () => {
+      const { result } = await loadedHook();
+      vi.clearAllMocks();
+      mockGetPath.mockResolvedValueOnce({
+        nodes: [userNode(ME), userNode('mid'), userNode('far')],
+        edges: [
+          { source: `user:${ME}`, target: 'user:mid', type: 'FOLLOWS' },
+          { source: 'user:mid', target: 'user:far', type: 'FOLLOWS' },
+        ],
+      });
+
+      await act(async () => {
+        await result.current.tracePath('far');
+      });
+
+      expect(startPulseOperation).toHaveBeenCalledExactlyOnceWith('graph-path-trace');
+      expect(pulseOperation.complete).toHaveBeenCalledExactlyOnceWith({ found: true, hops: 2 });
+    });
+
+    it('completes with found=false when Nexus answers that no path exists', async () => {
+      const { result } = await loadedHook();
+      vi.clearAllMocks();
+      mockGetPath.mockRejectedValueOnce(
+        Err.client(ClientErrorCode.NOT_FOUND, 'Not Found', { service: ErrorService.Nexus, operation: 'fetchNexus' }),
+      );
+
+      await act(async () => {
+        await result.current.tracePath('far');
+      });
+
+      expect(pulseOperation.complete).toHaveBeenCalledExactlyOnceWith({ found: false });
+      expect(pulseOperation.fail).not.toHaveBeenCalled();
+    });
+
+    it('fails a path trace only on a real error', async () => {
+      const { result } = await loadedHook();
+      vi.clearAllMocks();
+      const error = new Error('network down');
+      mockGetPath.mockRejectedValueOnce(error);
+
+      await act(async () => {
+        await result.current.tracePath('far');
+      });
+
+      expect(pulseOperation.fail).toHaveBeenCalledExactlyOnceWith(error);
+      expect(pulseOperation.complete).not.toHaveBeenCalled();
+    });
+
+    it('reports the node cap once per mount, however many merges prune', async () => {
+      const { result } = await loadedHook();
+      vi.clearAllMocks();
+      const crowd = (prefix: string) => ({
+        nodes: [userNode('friend'), ...Array.from({ length: 450 }, (_, i) => userNode(`${prefix}${i}`))],
+        edges: Array.from({ length: 450 }, (_, i) => ({
+          source: 'user:friend',
+          target: `user:${prefix}${i}`,
+          type: 'FOLLOWS' as const,
+        })),
+      });
+      mockGetNeighborhood.mockResolvedValueOnce(crowd('a')).mockResolvedValueOnce(crowd('b'));
+
+      await act(async () => {
+        await result.current.refreshNode('user:friend');
+      });
+      expect(trackPulseEvent).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        await result.current.refreshNode('user:friend');
+      });
+
+      expect(trackPulseEvent).toHaveBeenCalledExactlyOnceWith(
+        'graph_limit_reached',
+        expect.objectContaining({ limit: 'node_cap' }),
+      );
+    });
+
+    it('reports the automatic declutter of a dense graph', async () => {
+      const users = Array.from({ length: 40 }, (_, i) => userNode(`u${i}`));
+      const edges = users.flatMap((a, i) =>
+        users.slice(i + 1).map((b) => ({ source: a.id, target: b.id, type: 'FOLLOWS' as const })),
+      );
+      mockGetNeighborhood.mockResolvedValueOnce({ nodes: [userNode(ME), ...users], edges });
+      const { result } = renderHook(() => useSocialGraph());
+
+      await act(async () => {
+        await result.current.load(ME);
+      });
+
+      expect(trackPulseEvent).toHaveBeenCalledExactlyOnceWith(
+        'graph_limit_reached',
+        expect.objectContaining({ limit: 'auto_declutter' }),
+      );
+    });
   });
 });

@@ -99,6 +99,18 @@ Pulse is opt-in twice over: it does nothing without `PUBKY_RUNTIME_PULSE_CLIENT_
 
 There is deliberately no `capturePulseException` funnel mirroring `captureAppError`: `beforeSendPulse` runs on every path into the SDK (factory captures, boundary captures and its own unhandled handlers), so it is already the single policy point.
 
+### Custom telemetry (funnel steps, timed operations, events)
+
+Feature code never calls `Pulse.*` itself. It calls the three helpers in `pulse.ts` with a name from the catalog in `src/libs/observability/pulse.constants.ts`:
+
+- `trackPulseStep(PULSE_STEP.*)` — one funnel step (`step:<name>`); the name must match the funnel definition in the Pulse project exactly.
+- `startPulseOperation(PULSE_METRIC.*)` — a timed operation; finish the returned handle exactly once with `complete`, `fail(error)` or `cancel` (superseded work is a cancel, not a failure). Start it when the work starts: a handle created before `Pulse.init()` stays inert.
+- `trackPulseEvent(PULSE_EVENT.*)` — one snake_case event on a discrete outcome, never from render or a continuous gesture (zoom, pan, drag).
+
+Each helper is a no-op without consent, and every event still passes `beforeSendPulse`. Attribute values are kinds, flags and counts only — never a pubky, post id, tag label or anything the user typed — and attribute keys must not be one the scrubber redacts (`name`, `user`, `file`, …). `beforeSendPulse` exempts only the SDK's own well-formed `tracking_id` (a UUID) and `duration_ms` (digits) from the scrubber, whose phone pattern would otherwise split a start from its finish.
+
+The graph explorer is the only instrumented surface: the `graph-explore` funnel (opened → loaded → interacted → traced, once per mount of `/graph`), the `graph-neighborhood-load`, `graph-node-expand` and `graph-path-trace` operations (a 404 from the path endpoint means no path and completes with `found=false`), and the `graph_search_picked`, `graph_node_action`, `graph_control_used`, `graph_limit_reached`, `graph_layout_selected` and `graph_feed_viewed` events.
+
 ## Files
 
 - `src/instrumentation.ts` — server runtime dispatch + `onRequestError` + boot-time runtime-config fail-fast
@@ -106,7 +118,8 @@ There is deliberately no `capturePulseException` funnel mirroring `captureAppErr
 - `src/sentry.server.config.ts` / `src/sentry.edge.config.ts` — runtime-specific init
 - `src/libs/observability/sentry.ts` — single source of truth (`shouldEnableSentry`, `getSentryInitBase`, `captureAppError`). Sentry is off when `NODE_ENV=test`, `VITEST` is set, the **runtime** config has `testnet=true`, or no **runtime** DSN is configured. If the runtime config cannot be resolved at all, the gate returns `false` instead of throwing (the capture funnel must never mask the original boot error).
 - `src/libs/observability/sentry.constants.ts` — `OBSERVABILITY_IGNORE_ERRORS`, the one noise policy both Sentry and the optional Pulse sink spread into their SDK `ignoreErrors`; add a pattern here, never in a single initializer
-- `src/libs/observability/pulse.ts` — Pulse init, the consent gate, the screen-name allowlist and `beforeSendPulse`
+- `src/libs/observability/pulse.ts` — Pulse init, the consent gate, the screen-name allowlist, `beforeSendPulse` and the custom telemetry helpers
+- `src/libs/observability/pulse.constants.ts` — the custom telemetry catalog: funnel steps, metric slugs and event names
 - `src/libs/observability/pulse-consent.ts` — the stored consent choice and its generation, the availability gate, and the cross-tab subscription
 - `src/libs/error/error.factories.ts` — `createAppError()` calls `captureAppError(error)` after `Logger.error`, then `Pulse.captureException(error)`
 - `next.config.ts` — wrapped by `withSentryConfig(...)` for SDK wiring only; source-map upload is disabled (see below)

@@ -5,6 +5,8 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/atoms/Button/Button';
 import { Typography } from '@/atoms/Typography/Typography';
 import type { HideableClass } from '@/hooks/useSocialGraph/useSocialGraph.types';
+import { trackPulseEvent } from '@/libs/observability/pulse';
+import { PULSE_EVENT } from '@/libs/observability/pulse.constants';
 import { cn } from '@/libs/utils/utils';
 
 /** Edge-encoding rows: recent follows, intra-community links, bridges. */
@@ -89,7 +91,15 @@ export function SocialGraphLegend({
                 key={key}
                 type="button"
                 onMouseEnter={() => onHoverClass(hidden ? null : key)}
-                onClick={() => onToggleClass(key)}
+                onClick={() => {
+                  // `enabled` is the class's visibility after the click
+                  trackPulseEvent(PULSE_EVENT.GRAPH_CONTROL_USED, {
+                    control: 'legend',
+                    legend_class: key,
+                    enabled: hidden,
+                  });
+                  onToggleClass(key);
+                }}
                 aria-pressed={!hidden}
                 className={cn(
                   'flex items-center gap-2 rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-white/10',

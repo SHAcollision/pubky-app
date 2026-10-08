@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useGraphCore } from '@/hooks/useGraphCore/useGraphCore';
 import { isAppError } from '@/libs/error/error.utils';
 import { Logger } from '@/libs/logger/logger';
+import { startPulseOperation, trackPulseEvent } from '@/libs/observability/pulse';
+import { PULSE_EVENT, PULSE_METRIC } from '@/libs/observability/pulse.constants';
 import type { Pubky } from '@/models/models.types';
 import { toast } from '@/molecules/Toaster/toast';
 import type { NexusGraph, NexusGraphEdge, NexusGraphNode } from '@/services/nexus/graph/graph.types';
@@ -110,6 +112,10 @@ export function useSocialGraph(): UseSocialGraphResult {
     // A full load replaces the canvas: a failure must not leave the previous
     // center's graph under the new URL with the error hidden behind it
     setGraph({ nodes: [], edges: [] });
+    const operation = startPulseOperation(PULSE_METRIC.GRAPH_NEIGHBORHOOD_LOAD, {
+      signed_in: core.currentUserPubky !== null,
+      is_self: pubky === core.currentUserPubky,
+    });
     try {
       const neighborhood = await core.fetchNeighborhood({
         kind: 'user',
@@ -117,7 +123,11 @@ export function useSocialGraph(): UseSocialGraphResult {
         depth: 1,
         ...(core.fetchKinds ? { kinds: core.fetchKinds } : {}),
       });
-      if (nonce !== loadNonceRef.current) return;
+      if (nonce !== loadNonceRef.current) {
+        operation.cancel();
+        return;
+      }
+      operation.complete({ node_count: neighborhood.nodes.length, edge_count: neighborhood.edges.length });
       setGraph(neighborhood);
       setFocusId(`user:${pubky}`);
       setExpandedIds(new Set([`user:${pubky}`]));
@@ -125,7 +135,11 @@ export function useSocialGraph(): UseSocialGraphResult {
       const entry = center && trailEntryOf(center);
       setTrail(entry ? [entry] : []);
     } catch (err) {
-      if (nonce !== loadNonceRef.current) return;
+      if (nonce !== loadNonceRef.current) {
+        operation.cancel();
+        return;
+      }
+      operation.fail(err);
       if (!isAppError(err)) Logger.error('useSocialGraph: failed to load graph', err);
       setError(true);
     } finally {
@@ -153,6 +167,7 @@ export function useSocialGraph(): UseSocialGraphResult {
     }
     const nonce = loadNonceRef.current;
     setIsExpanding(true);
+    const operation = startPulseOperation(PULSE_METRIC.GRAPH_NODE_EXPAND, { node_kind: 'user', trigger: 'add_user' });
     try {
       const neighborhood = await core.fetchNeighborhood({
         kind: 'user',
@@ -160,7 +175,11 @@ export function useSocialGraph(): UseSocialGraphResult {
         depth: 1,
         ...(core.fetchKinds ? { kinds: core.fetchKinds } : {}),
       });
-      if (nonce !== loadNonceRef.current) return;
+      if (nonce !== loadNonceRef.current) {
+        operation.cancel();
+        return;
+      }
+      operation.complete({ node_count: neighborhood.nodes.length, edge_count: neighborhood.edges.length });
       // Anchor the prune on the incoming center: a disconnected search-added
       // cluster is otherwise "infinitely far" from the old focus and gets
       // evicted the moment it lands
@@ -171,6 +190,8 @@ export function useSocialGraph(): UseSocialGraphResult {
       const entry = center && trailEntryOf(center);
       if (entry) setTrail((prev) => (prev.at(-1)?.id === nodeId ? prev : [...prev, entry]));
     } catch (err) {
+      if (nonce !== loadNonceRef.current) operation.cancel();
+      else operation.fail(err);
       if (!isAppError(err)) Logger.error('useSocialGraph: failed to add user', err);
       toast({ variant: 'error', description: 'Could not expand this node.' });
     } finally {
@@ -206,6 +227,7 @@ export function useSocialGraph(): UseSocialGraphResult {
     autoDecluttered.current = true;
     setDeclutter(true);
     toast({ description: 'Dense graph: declutter is on. Toggle it in the controls.' });
+    trackPulseEvent(PULSE_EVENT.GRAPH_LIMIT_REACHED, { limit: 'auto_declutter', edge_count: realEdgeCount });
   }, [realEdgeCount, setDeclutter]);
 
   return {

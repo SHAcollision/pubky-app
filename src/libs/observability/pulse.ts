@@ -22,13 +22,21 @@ import { AppError } from '@/libs/error/error';
 import { OBSERVABILITY_IGNORE_ERRORS } from '@/libs/observability/sentry.constants';
 import { sanitizeForSentry, shouldDropCapturedExceptionFromSentry } from '@/libs/observability/sentry.utils';
 import { getDeployEnv, getPulseClientKey, getPulseEndpoint } from '@/libs/runtime-config/runtime-config';
+import type {
+  PulseEvent,
+  PulseMetric,
+  PulseOperationHandle,
+  PulseStep,
+  PulseTelemetryAttributes,
+} from './pulse.constants';
 import { getPulseConsent, getPulseConsentGeneration, subscribePulseConsent } from './pulse-consent';
 
 /**
- * Pulse browser SDK wiring: the consent gate, the `Pulse.init()` options, and `beforeSendPulse`.
+ * Pulse browser SDK wiring: the consent gate, the `Pulse.init()` options, `beforeSendPulse`, and the helpers that
+ * emit the custom telemetry catalogued in pulse.constants.ts.
  *
  * As for Sentry, do NOT import @synonymdev/pubky-pulse-web outside:
- * - This file (init + beforeSend)
+ * - This file (init + beforeSend + custom telemetry helpers)
  * - app/error.tsx and app/global-error.tsx (the React error boundaries)
  * - error.factories.ts (the one AppError capture call)
  *
@@ -111,8 +119,46 @@ export function beforeSendPulse(event: LogEvent, { originalException: error }: P
     }
   }
   event.message = sanitizeForSentry(event.message) as string;
+  const operationKeys = pickOperationKeys(event.custom_attributes);
   event.custom_attributes = sanitizeForSentry(event.custom_attributes) as LogEvent['custom_attributes'];
+  if (operationKeys) Object.assign((event.custom_attributes ??= {}), operationKeys);
   return event;
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DIGITS_PATTERN = /^\d+$/;
+
+/**
+ * The SDK's own operation keys, when well formed. The phone scrubber matches the digit runs inside a UUID, and a
+ * redacted `tracking_id` unpairs an operation's start from its finish; values of any other shape stay scrubbed.
+ */
+function pickOperationKeys(attributes: LogEvent['custom_attributes']): Record<string, string> | null {
+  const kept: Record<string, string> = {};
+  const trackingId = attributes?.tracking_id;
+  const durationMs = attributes?.duration_ms;
+  if (trackingId && UUID_PATTERN.test(trackingId)) kept.tracking_id = trackingId;
+  if (durationMs && DIGITS_PATTERN.test(durationMs)) kept.duration_ms = durationMs;
+  return Object.keys(kept).length > 0 ? kept : null;
+}
+
+const INACTIVE_OPERATION: PulseOperationHandle = { complete() {}, fail() {}, cancel() {} };
+
+/** Record one funnel step. A no-op without consent, like every helper below. */
+export function trackPulseStep(step: PulseStep, attributes?: PulseTelemetryAttributes): void {
+  if (getPulseConsent() !== 'accepted') return;
+  Pulse.step(step, attributes);
+}
+
+/** Start a timed operation. Call it when the work starts, never ahead of time: a handle made before init stays inert. */
+export function startPulseOperation(metric: PulseMetric, attributes?: PulseTelemetryAttributes): PulseOperationHandle {
+  if (getPulseConsent() !== 'accepted') return INACTIVE_OPERATION;
+  return Pulse.startOperation(metric, attributes);
+}
+
+/** Record one custom event. Emit on a discrete outcome, never from render or a continuous gesture. */
+export function trackPulseEvent(event: PulseEvent, attributes?: PulseTelemetryAttributes): void {
+  if (getPulseConsent() !== 'accepted') return;
+  Pulse.info(event, attributes);
 }
 
 /**

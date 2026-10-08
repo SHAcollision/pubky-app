@@ -1,6 +1,8 @@
 'use client';
 
 import { Columns3, Grid2X2, LayoutDashboard, Rows2, Rows4, Waypoints } from 'lucide-react';
+import { trackPulseEvent } from '@/libs/observability/pulse';
+import { PULSE_EVENT } from '@/libs/observability/pulse.constants';
 import { LAYOUT, type LayoutType } from '@/stores/home/home.types';
 import { FilterRadioGroup } from '../FilterRadioGroup/FilterRadioGroup';
 import { BaseFilterProps, FilterListItem } from '../Filters.types';
@@ -42,7 +44,13 @@ export function FilterLayout({
       items={items}
       selectedValue={displaySelectedTab}
       defaultValue={defaultSelectedTab}
-      onChange={onTabChange}
+      onChange={(layout) => {
+        // Adoption of the feed's graph surface; the other layouts are not graph telemetry
+        if (layout === LAYOUT.GRAPH && displaySelectedTab !== LAYOUT.GRAPH) {
+          trackPulseEvent(PULSE_EVENT.GRAPH_LAYOUT_SELECTED);
+        }
+        onTabChange?.(layout);
+      }}
       dataCy="filter-layout-radiogroup"
     />
   );

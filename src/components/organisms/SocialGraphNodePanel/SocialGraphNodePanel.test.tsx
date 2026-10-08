@@ -1,5 +1,6 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { trackPulseEvent } from '@/libs/observability/pulse';
 import type { NexusGraphNode } from '@/services/nexus/graph/graph.types';
 import { SocialGraphNodePanel } from './SocialGraphNodePanel';
 
@@ -31,6 +32,8 @@ vi.mock('@/molecules/PostPreviewCard/PostPreviewCard', () => ({
 vi.mock('../DialogReply/DialogReply', () => ({
   DialogReply: () => null,
 }));
+
+vi.mock('@/libs/observability/pulse', () => ({ trackPulseEvent: vi.fn() }));
 
 const baseProps = {
   relationship: 'following' as const,
@@ -119,5 +122,26 @@ describe('SocialGraphNodePanel', () => {
     // The kind label (the Reply action button also says "Reply")
     expect(document.querySelector('[data-cy="graph-panel"] .uppercase')).toHaveTextContent('Reply');
     expect(screen.queryByText('Post')).not.toBeInTheDocument();
+  });
+
+  it('reports what people do with a node, by kind, never which node', () => {
+    vi.mocked(trackPulseEvent).mockClear();
+    const user: NexusGraphNode = { kind: 'user', id: 'user:abc', pubky: 'abc', name: 'Alice', image: null };
+    const { unmount } = render(<SocialGraphNodePanel node={user} {...baseProps} />);
+    fireEvent.click(document.querySelector('[data-cy="graph-panel-focus"]')!);
+    fireEvent.click(screen.getByLabelText('Follow'));
+    fireEvent.click(screen.getByText('Profile'));
+    unmount();
+
+    const tag: NexusGraphNode = { kind: 'tag', id: 'tag:bitcoin', label: 'bitcoin', count: 12 };
+    render(<SocialGraphNodePanel node={tag} {...baseProps} />);
+    fireEvent.click(screen.getByText('Search'));
+
+    expect(vi.mocked(trackPulseEvent).mock.calls).toEqual([
+      ['graph_node_action', { action: 'focus', node_kind: 'user' }],
+      ['graph_node_action', { action: 'follow', node_kind: 'user' }],
+      ['graph_node_action', { action: 'profile', node_kind: 'user' }],
+      ['graph_node_action', { action: 'tag_search', node_kind: 'tag' }],
+    ]);
   });
 });

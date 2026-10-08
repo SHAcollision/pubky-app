@@ -76,7 +76,8 @@ Controller naming encodes IO: `fetch*` network only, `get*` local only, `getMany
 - Env: only `src/libs/env/env.ts` and `src/libs/runtime-config/**` read `process.env.NEXT_PUBLIC_*` / `PUBKY_RUNTIME_*`
   (ESLint-enforced); deploy-time values are `PUBKY_RUNTIME_*` getters, never secrets. `docs/environment.md`
 - Observability: throw via `Err.*`; they capture to Sentry and, in a consenting browser, Pulse. No other direct
-  `captureException` except `app/error.tsx` / `app/global-error.tsx`, for non-`AppError` values; no raw user data. `docs/sentry.md`
+  `captureException` except `app/error.tsx` / `app/global-error.tsx`, for non-`AppError` values; no raw user data. Custom
+  Pulse telemetry only through the `pulse.ts` helpers and the `pulse.constants.ts` catalog. `docs/sentry.md`
 - Tests: colocated `*.test.tsx`, one snapshot per test, mobile snapshot blocks for viewport-aware organisms; no `as any` or
   `as unknown as T` (use the `src/test-utils` helpers). `docs/component-testing.md`
 

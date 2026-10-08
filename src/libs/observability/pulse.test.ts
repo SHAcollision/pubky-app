@@ -7,7 +7,16 @@ import { ErrorCategory, ErrorService } from '@/libs/error/error.types';
 import { resetRuntimeConfigForTests, RUNTIME_CONFIG_WINDOW_KEY } from '@/libs/runtime-config/runtime-config';
 import { NETWORK_RUNTIME_DEFAULTS } from '@/libs/runtime-config/runtime-config.schema';
 import { PUBKY_52_STAGING_FIXTURE as PUBLIC_KEY } from '@/test-utils/pubky';
-import { beforeSendPulse, initPulse, pulseScreenName } from './pulse';
+import { asOpaque } from '@/test-utils/type-assertions';
+import {
+  beforeSendPulse,
+  initPulse,
+  pulseScreenName,
+  startPulseOperation,
+  trackPulseEvent,
+  trackPulseStep,
+} from './pulse';
+import { PULSE_EVENT, PULSE_METRIC, PULSE_STEP } from './pulse.constants';
 import { PULSE_CONSENT_KEY } from './pulse-consent';
 import { OBSERVABILITY_IGNORE_ERRORS } from './sentry.constants';
 
@@ -16,7 +25,7 @@ vi.hoisted(() => vi.resetModules());
 vi.mock('@/libs/env/env', () => ({ Env: { NODE_ENV: 'production', NEXT_PUBLIC_APP_VERSION: 'test' } }));
 vi.mock('@synonymdev/pubky-pulse-web', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@synonymdev/pubky-pulse-web')>()),
-  Pulse: { init: vi.fn(), captureException: vi.fn() },
+  Pulse: { init: vi.fn(), captureException: vi.fn(), step: vi.fn(), startOperation: vi.fn(), info: vi.fn() },
 }));
 
 const LOCAL_ENDPOINT = 'http://127.0.0.1:4007';
@@ -170,6 +179,30 @@ describe('shared capture and privacy policy', () => {
     expect(beforeSendPulse(event(), { originalException: root })).not.toBeNull();
     expect(beforeSendPulse(event(), { originalException: wrapper })).toBeNull();
   });
+  it('keeps well-formed operation keys out of the phone scrubber so start and finish stay paired', () => {
+    const trackingId = '12345678-1234-4123-9123-123456789012';
+    const result = beforeSendPulse(
+      event({
+        level: 'info',
+        message: 'metric:graph-node-expand:complete',
+        custom_attributes: { tracking_id: trackingId, duration_ms: '123456789', note: 'call +1 555 123 4567' },
+      }),
+      {},
+    );
+    expect(result?.custom_attributes).toEqual({
+      tracking_id: trackingId,
+      duration_ms: '123456789',
+      note: 'call [redacted: phone]',
+    });
+  });
+  it('still scrubs operation keys that are not the SDK shape', () => {
+    const result = beforeSendPulse(
+      event({ custom_attributes: { tracking_id: `id ${PUBLIC_KEY}`, duration_ms: '+1 555 123 4567' } }),
+      {},
+    );
+    expect(JSON.stringify(result)).not.toContain(PUBLIC_KEY);
+    expect(result?.custom_attributes?.duration_ms).toBe('[redacted: phone]');
+  });
   it('retains the app-specific drop policy using the original exception hint', () => {
     const error = Err.client(ClientErrorCode.NOT_FOUND, 'Not found', {
       service: ErrorService.Nexus,
@@ -177,5 +210,33 @@ describe('shared capture and privacy policy', () => {
       context: { statusCode: 404, endpoint: 'https://example.com/v0/post/user/post/tags' },
     });
     expect(beforeSendPulse(event(), { originalException: error })).toBeNull();
+  });
+});
+
+describe('custom telemetry helpers', () => {
+  it('forward catalogued names and attributes to the SDK once consent is given', () => {
+    const operation = { complete: vi.fn(), fail: vi.fn(), cancel: vi.fn() };
+    vi.mocked(Pulse.startOperation).mockReturnValue(asOpaque<ReturnType<typeof Pulse.startOperation>>(operation));
+    trackPulseStep(PULSE_STEP.GRAPH_EXPLORE_OPENED, { signed_in: false });
+    trackPulseEvent(PULSE_EVENT.GRAPH_CONTROL_USED, { control: 'fit' });
+    expect(startPulseOperation(PULSE_METRIC.GRAPH_NODE_EXPAND, { node_kind: 'tag' })).toBe(operation);
+    expect(Pulse.step).toHaveBeenCalledExactlyOnceWith('graph-explore-opened', { signed_in: false });
+    expect(Pulse.info).toHaveBeenCalledExactlyOnceWith('graph_control_used', { control: 'fit' });
+    expect(Pulse.startOperation).toHaveBeenCalledExactlyOnceWith('graph-node-expand', { node_kind: 'tag' });
+  });
+  it.each([['declined'], [null]])('never reach the SDK when consent is %s', (choice) => {
+    if (choice) localStorage.setItem(PULSE_CONSENT_KEY, choice);
+    else localStorage.removeItem(PULSE_CONSENT_KEY);
+    trackPulseStep(PULSE_STEP.GRAPH_EXPLORE_OPENED);
+    trackPulseEvent(PULSE_EVENT.GRAPH_FEED_VIEWED);
+    const operation = startPulseOperation(PULSE_METRIC.GRAPH_PATH_TRACE);
+    expect(() => {
+      operation.complete({ found: true });
+      operation.fail(new Error('boom'));
+      operation.cancel();
+    }).not.toThrow();
+    expect(Pulse.step).not.toHaveBeenCalled();
+    expect(Pulse.info).not.toHaveBeenCalled();
+    expect(Pulse.startOperation).not.toHaveBeenCalled();
   });
 });
