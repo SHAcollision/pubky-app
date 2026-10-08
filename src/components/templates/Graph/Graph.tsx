@@ -12,6 +12,7 @@ import { Typography } from '@/atoms/Typography/Typography';
 import { GRAPH_PILL_CLASS, GRAPH_SURFACE_CLASS } from '@/config/theme';
 import { useFullscreenToggle } from '@/hooks/useFullscreenToggle/useFullscreenToggle';
 import { useGraphDebug } from '@/hooks/useGraphDebug/useGraphDebug';
+import { useGraphExploreFunnel } from '@/hooks/useGraphExploreFunnel/useGraphExploreFunnel';
 import { useIsMobile } from '@/hooks/useIsMobile/useIsMobile';
 import { useSocialGraph } from '@/hooks/useSocialGraph/useSocialGraph';
 import type { HideableClass, TrailEntry } from '@/hooks/useSocialGraph/useSocialGraph.types';
@@ -22,6 +23,8 @@ import {
   type VisualGraphNode,
 } from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { useTrackedPoint } from '@/hooks/useTrackedPoint/useTrackedPoint';
+import { trackPulseEvent } from '@/libs/observability/pulse';
+import { PULSE_EVENT } from '@/libs/observability/pulse.constants';
 import { cn } from '@/libs/utils/utils';
 import type { Pubky } from '@/models/models.types';
 import { CanvasAnchoredPopover } from '@/molecules/CanvasAnchoredPopover/CanvasAnchoredPopover';
@@ -86,6 +89,17 @@ export function Graph() {
   const isMobile = useIsMobile();
   const { load } = graph;
 
+  const meId = currentUserPubky ? `user:${currentUserPubky}` : null;
+  // Anything beyond the viewer's own seed node is content: a searched
+  // isolated user or tag is a valid one-node graph
+  const hasContent = graph.nodes.some((n) => n.id !== meId);
+  const markInteracted = useGraphExploreFunnel({
+    signedIn: currentUserPubky !== null,
+    deepLink: searchParams.has('user'),
+    loaded: !graph.isLoading && !graph.error && hasContent,
+    traced: (graph.pathIds?.length ?? 0) > 0,
+  });
+
   const focusAndCenter = (id: string) => {
     graph.focus(id);
     canvasRef.current?.centerOn(id);
@@ -124,6 +138,7 @@ export function Graph() {
 
   const { addUser, addTag, expand } = graph;
   const handlePickUser = async (pubky: Pubky) => {
+    markInteracted();
     const nodeId = `user:${pubky}`;
     await addUser(pubky);
     // Expands nodes that were already on the canvas; freshly added centers
@@ -132,10 +147,20 @@ export function Graph() {
     flyToNode(nodeId);
   };
   const handlePickTag = async (label: string) => {
+    markInteracted();
     const nodeId = `tag:${label}`;
     await addTag(label);
     await expand(nodeId);
     flyToNode(nodeId);
+  };
+  // Header and in-canvas search; chip and pill picks share the handlers above but are not searches
+  const handleSearchPickUser = (pubky: Pubky) => {
+    trackPulseEvent(PULSE_EVENT.GRAPH_SEARCH_PICKED, { target: 'user' });
+    void handlePickUser(pubky);
+  };
+  const handleSearchPickTag = (label: string) => {
+    trackPulseEvent(PULSE_EVENT.GRAPH_SEARCH_PICKED, { target: 'tag' });
+    void handlePickTag(label);
   };
 
   // Advanced lens preferences (design-off defaults)
@@ -165,16 +190,14 @@ export function Graph() {
   // target, not on every render that recreates them
   const searchTarget = useGraphStore((state) => state.searchTarget);
   const onSearchTarget = useEffectEvent((target: NonNullable<typeof searchTarget>) => {
-    if (target.kind === 'user') void handlePickUser(target.pubky as Pubky);
-    else void handlePickTag(target.label);
+    if (target.kind === 'user') handleSearchPickUser(target.pubky as Pubky);
+    else handleSearchPickTag(target.label);
   });
   useEffect(() => {
     if (!searchTarget) return;
     onSearchTarget(searchTarget);
     useGraphStore.getState().clearSearchTarget();
   }, [searchTarget]);
-
-  const meId = currentUserPubky ? `user:${currentUserPubky}` : null;
 
   // "Followed by ..." strip data, straight from edges already on the canvas
   const proofUsers = proofUsersOf(meId, graph.selectedNode, graph.edges, graph.nodes);
@@ -276,6 +299,7 @@ export function Graph() {
   // focused user opens the bottom-sheet panel instead.
   const { recenter, select: graphSelect } = graph;
   const handleNodeClick = (id: string) => {
+    markInteracted();
     if (id.startsWith('user:')) {
       setHoverCard(null);
       if (isMobile && graph.focusId === id) {
@@ -305,7 +329,14 @@ export function Graph() {
     }
   };
 
+  const handleNodeExpand = (id: string) => {
+    markInteracted();
+    void graph.expand(id);
+  };
+
   const handleTraceConnection = (pubky: string) => {
+    // The hover card can trace before any click
+    markInteracted();
     setHoverCard(null);
     void graph.tracePath(pubky as Pubky);
   };
@@ -319,13 +350,11 @@ export function Graph() {
   };
 
   const handleHop = (entry: TrailEntry) => {
+    markInteracted();
     graph.focus(entry.id);
     canvasRef.current?.centerOn(entry.id);
   };
 
-  // Anything beyond the viewer's own seed node is content: a searched
-  // isolated user or tag is a valid one-node graph
-  const hasContent = graph.nodes.some((n) => n.id !== meId);
   const isEmpty = !graph.isLoading && !graph.error && !hasContent;
 
   // Tracked anchor points: overlays follow their canvas entity per frame
@@ -396,7 +425,7 @@ export function Graph() {
         communityLabels={graph.communityLabels}
         edgeChipsOn={edgeChipsOn}
         onNodeClick={handleNodeClick}
-        onNodeExpand={graph.expand}
+        onNodeExpand={handleNodeExpand}
         onLinkClick={handleLinkClick}
         onUserHover={handleUserHover}
         onBackgroundClick={() => {
@@ -421,8 +450,8 @@ export function Graph() {
             page); the local field is the mobile affordance */}
         <GraphSearch
           className="pointer-events-auto w-full sm:ml-auto sm:w-56 lg:hidden"
-          onPickUser={handlePickUser}
-          onPickTag={handlePickTag}
+          onPickUser={handleSearchPickUser}
+          onPickTag={handleSearchPickTag}
         />
       </div>
 

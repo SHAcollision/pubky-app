@@ -20,8 +20,10 @@ import {
   tierOf,
   type VisualGraphNode,
 } from '@/hooks/useSocialGraph/useSocialGraph.utils';
-import { isAppError } from '@/libs/error/error.utils';
+import { isAppError, isNotFound } from '@/libs/error/error.utils';
 import { Logger } from '@/libs/logger/logger';
+import { startPulseOperation, trackPulseEvent } from '@/libs/observability/pulse';
+import { PULSE_EVENT, PULSE_METRIC } from '@/libs/observability/pulse.constants';
 import type { Pubky } from '@/models/models.types';
 import { toast } from '@/molecules/Toaster/toast';
 import type {
@@ -225,6 +227,8 @@ export function useGraphCore({
   const [isTracing, setIsTracing] = useState(false);
   // Guards against a stale expansion/trace resolving after a newer load started
   const loadNonceRef = useRef(0);
+  // The node cap is reported to Pulse once per mount; every later prune repeats the same news
+  const nodeCapReportedRef = useRef(false);
   // Chip node objects survive recomputes so the sim never resets their layout.
   // Held in state (never replaced) rather than a ref: the pipeline below runs
   // during render, where refs may not be read
@@ -282,7 +286,17 @@ export function useGraphCore({
       // A node whose neighborhood was evicted must become expandable again
       setExpandedIds((prev) => new Set([...prev].filter((id) => !result.evictedIds.has(id))));
     }
-    if (result.pruned > 0) toast({ description: 'Graph is full: distant nodes were hidden.' });
+    if (result.pruned > 0) {
+      toast({ description: 'Graph is full: distant nodes were hidden.' });
+      if (!nodeCapReportedRef.current) {
+        nodeCapReportedRef.current = true;
+        trackPulseEvent(PULSE_EVENT.GRAPH_LIMIT_REACHED, {
+          limit: 'node_cap',
+          node_count: result.graph.nodes.length,
+          pruned: result.pruned,
+        });
+      }
+    }
   };
 
   const doExpand = async (nodeId: string, force: boolean, anchorId?: string) => {
@@ -291,16 +305,26 @@ export function useGraphCore({
     if (!force && expandedIds.has(nodeId)) return;
     const nonce = loadNonceRef.current;
     setIsExpanding(true);
+    const operation = startPulseOperation(PULSE_METRIC.GRAPH_NODE_EXPAND, {
+      node_kind: node.kind,
+      trigger: force ? 'refresh' : 'expand',
+    });
     try {
       const neighborhood = await fetchNeighborhood(expandParamsOf(node, fetchKinds));
       // A newer load() replaced the graph while we were in flight
-      if (nonce !== loadNonceRef.current) return;
+      if (nonce !== loadNonceRef.current) {
+        operation.cancel();
+        return;
+      }
+      operation.complete({ node_count: neighborhood.nodes.length, edge_count: neighborhood.edges.length });
       // Recenter passes the clicked node as anchor: focus state has not
       // committed yet in the same handler, so resolveAnchor would prune
       // around the OLD focus and could evict the just-clicked cluster
       mergeNeighborhood(neighborhood, node, anchorId);
       setExpandedIds((prev) => new Set(prev).add(nodeId));
     } catch (err) {
+      if (nonce !== loadNonceRef.current) operation.cancel();
+      else operation.fail(err);
       // Non-fatal: the current graph stays untouched
       if (!isAppError(err)) Logger.error(`${logTag}: failed to expand node`, err);
       toast({ variant: 'error', description: 'Could not expand this node.' });
@@ -330,15 +354,22 @@ export function useGraphCore({
     }
     const nonce = loadNonceRef.current;
     setIsExpanding(true);
+    const operation = startPulseOperation(PULSE_METRIC.GRAPH_NODE_EXPAND, { node_kind: 'tag', trigger: 'add_tag' });
     try {
       const neighborhood = await fetchNeighborhood({ kind: 'tag', id: label });
-      if (nonce !== loadNonceRef.current) return;
+      if (nonce !== loadNonceRef.current) {
+        operation.cancel();
+        return;
+      }
+      operation.complete({ node_count: neighborhood.nodes.length, edge_count: neighborhood.edges.length });
       // Anchor the prune on the incoming hub: a disconnected added cluster
       // is otherwise "infinitely far" from the focus and gets evicted
       mergeNeighborhood(neighborhood, null, nodeId);
       setExpandedIds((prev) => new Set(prev).add(nodeId));
       setSelectedId(nodeId);
     } catch (err) {
+      if (nonce !== loadNonceRef.current) operation.cancel();
+      else operation.fail(err);
       if (!isAppError(err)) Logger.error(`${logTag}: failed to add tag`, err);
       toast({ variant: 'error', description: 'Could not expand this node.' });
     } finally {
@@ -350,14 +381,23 @@ export function useGraphCore({
     if (!currentUserPubky || isTracing) return;
     const nonce = loadNonceRef.current;
     setIsTracing(true);
+    const operation = startPulseOperation(PULSE_METRIC.GRAPH_PATH_TRACE);
     try {
       const path = await GraphController.fetchPath({ from: currentUserPubky, to: targetPubky });
       void GraphController.hydrateEntities(path, currentUserPubky);
-      if (nonce !== loadNonceRef.current) return;
+      if (nonce !== loadNonceRef.current) {
+        operation.cancel();
+        return;
+      }
+      operation.complete({ found: true, hops: path.nodes.length - 1 });
       const me = graph.nodes.find((n) => n.id === `user:${currentUserPubky}`) ?? null;
       mergeNeighborhood(path, me, me?.id);
       setPathIds(path.nodes.map((n) => n.id));
     } catch (err) {
+      // Nexus answers 404 when no path exists within 4 hops: an answer, not a failure
+      if (nonce !== loadNonceRef.current) operation.cancel();
+      else if (isAppError(err) && isNotFound(err)) operation.complete({ found: false });
+      else operation.fail(err);
       if (!isAppError(err)) Logger.error(`${logTag}: failed to trace path`, err);
       toast({ variant: 'error', description: 'No follow path found within 4 hops.' });
     } finally {

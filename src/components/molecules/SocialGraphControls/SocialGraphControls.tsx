@@ -4,6 +4,8 @@ import { Expand, History, Shrink, SlidersHorizontal, UserRound, ZoomIn, ZoomOut 
 import { Button } from '@/atoms/Button/Button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/atoms/Popover/Popover';
 import { GRAPH_PILL_ACTIVE_CLASS, GRAPH_PILL_CLASS, GRAPH_SURFACE_CLASS } from '@/config/theme';
+import { trackPulseEvent } from '@/libs/observability/pulse';
+import { PULSE_EVENT } from '@/libs/observability/pulse.constants';
 import { cn } from '@/libs/utils/utils';
 import type { SocialGraphControlsProps } from './SocialGraphControls.types';
 
@@ -55,7 +57,10 @@ export function SocialGraphControls({
         variant="ghost"
         size="icon"
         className={cn(GRAPH_PILL_CLASS, timeMachineOn && GRAPH_PILL_ACTIVE_CLASS)}
-        onClick={onToggleTimeMachine}
+        onClick={() => {
+          trackPulseEvent(PULSE_EVENT.GRAPH_CONTROL_USED, { control: 'time_machine', enabled: !timeMachineOn });
+          onToggleTimeMachine();
+        }}
         disabled={!timeMachineAvailable}
         aria-label="Time machine"
         aria-pressed={timeMachineOn}
@@ -69,7 +74,10 @@ export function SocialGraphControls({
           variant="ghost"
           size="icon"
           className={GRAPH_PILL_CLASS}
-          onClick={onRecenterSelf}
+          onClick={() => {
+            trackPulseEvent(PULSE_EVENT.GRAPH_CONTROL_USED, { control: 'recenter' });
+            onRecenterSelf();
+          }}
           aria-label="Re-center"
           title="Re-center"
           data-cy="graph-recenter"
@@ -105,7 +113,10 @@ export function SocialGraphControls({
         variant="ghost"
         size="icon"
         className={cn(GRAPH_PILL_CLASS, isFullscreen && GRAPH_PILL_ACTIVE_CLASS)}
-        onClick={onToggleFullscreen}
+        onClick={() => {
+          trackPulseEvent(PULSE_EVENT.GRAPH_CONTROL_USED, { control: 'fullscreen', enabled: !isFullscreen });
+          onToggleFullscreen();
+        }}
         aria-label={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
         aria-pressed={isFullscreen}
         title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}

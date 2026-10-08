@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { Loader2, StickyNote, X } from 'lucide-react';
 import { Button } from '@/atoms/Button/Button';
 import { Container } from '@/atoms/Container/Container';
@@ -14,6 +14,8 @@ import type { HideableClass } from '@/hooks/useSocialGraph/useSocialGraph.types'
 import { socialProof } from '@/hooks/useSocialGraph/useSocialGraph.utils';
 import { useStreamGraph } from '@/hooks/useStreamGraph/useStreamGraph';
 import { useTrackedPoint } from '@/hooks/useTrackedPoint/useTrackedPoint';
+import { trackPulseEvent } from '@/libs/observability/pulse';
+import { PULSE_EVENT } from '@/libs/observability/pulse.constants';
 import { cn } from '@/libs/utils/utils';
 import type { Pubky } from '@/models/models.types';
 import { GraphTimeMachine } from '@/molecules/GraphTimeMachine/GraphTimeMachine';
@@ -79,6 +81,18 @@ export function StreamGraphPosts({
 
   const { edgeChipsOn, tagHubsOn, toggleEdgeChips, toggleTagHubs } = useGraphStore();
   const meId = currentUserPubky ? `user:${currentUserPubky}` : null;
+
+  // The layout choice persists, so this counts graph feed views, not choices (FilterLayout reports those).
+  // Once per mount: StrictMode replays the effect but keeps the ref.
+  const viewedRef = useRef(false);
+  const onViewed = useEffectEvent(() => {
+    if (viewedRef.current) return;
+    viewedRef.current = true;
+    trackPulseEvent(PULSE_EVENT.GRAPH_FEED_VIEWED, { signed_in: currentUserPubky !== null });
+  });
+  useEffect(() => {
+    onViewed();
+  }, []);
 
   // QA/debug surface for the cypress interaction audit (debug builds only)
   const { focusId: graphFocusId, pathIds: graphPathIds } = graph;

@@ -1,7 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { HideableClass } from '@/hooks/useSocialGraph/useSocialGraph.types';
+import { trackPulseEvent } from '@/libs/observability/pulse';
 import { SocialGraphLegend } from './SocialGraphLegend';
+
+vi.mock('@/libs/observability/pulse', () => ({ trackPulseEvent: vi.fn() }));
 
 const props = {
   classCounts: new Map<HideableClass, number>([
@@ -51,5 +54,18 @@ describe('SocialGraphLegend', () => {
     // Leaving the legend clears the edge spotlight too
     fireEvent.mouseLeave(document.querySelector('[data-cy="graph-legend"]')!);
     expect(onHoverEdges).toHaveBeenLastCalledWith(null);
+  });
+
+  it('reports each class toggle with the visibility it leads to', () => {
+    vi.mocked(trackPulseEvent).mockClear();
+    render(<SocialGraphLegend {...props} />);
+
+    fireEvent.click(document.querySelector('[data-cy="graph-legend-friend"]')!);
+    fireEvent.click(document.querySelector('[data-cy="graph-legend-post"]')!);
+
+    expect(vi.mocked(trackPulseEvent).mock.calls).toEqual([
+      ['graph_control_used', { control: 'legend', legend_class: 'friend', enabled: false }],
+      ['graph_control_used', { control: 'legend', legend_class: 'post', enabled: true }],
+    ]);
   });
 });
